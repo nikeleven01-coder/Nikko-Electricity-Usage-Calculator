@@ -1,22 +1,16 @@
 import streamlit as st
 import pdfplumber
 import re
+import pandas as pd
 
 st.set_page_config(page_title="Electric Bill Calculator", page_icon="⚡", layout="centered")
 st.title("⚡ Electric Bill Calculator")
 
 uploaded_file = st.file_uploader("📂 Upload your electric bill (PDF)", type="pdf")
 
-diff_rdg = None
-billed = None
+total_kwh = None
 rate_per_kwh = None
-charges = {}
-
-def to_float(val):
-    try:
-        return float(val.replace(",", ""))
-    except:
-        return None
+df_sections = None
 
 if uploaded_file:
     with pdfplumber.open(uploaded_file) as pdf:
@@ -25,99 +19,59 @@ if uploaded_file:
             if page.extract_text():
                 text += page.extract_text() + "\n"
 
-        # --- Extract Total kWh (Diff Rdg) ---
-        match_diff = re.search(r"Diff\s*Rdg\s*:\s*(\d+)", text, re.IGNORECASE)
-        diff_rdg = int(match_diff.group(1)) if match_diff else None
-
-        match_billed = re.search(r"Billed\s*:\s*(\d+)", text, re.IGNORECASE)
-        billed = int(match_billed.group(1)) if match_billed else None
-
-        # --- Extract Total Amount Due ---
+        # --- Extract TOTAL AMOUNT DUE ---
         match_due = re.search(r"TOTAL AMOUNT DUE\s+([\d,]+\.\d{2})", text, re.IGNORECASE)
-        total_due = to_float(match_due.group(1)) if match_due else None
+        total_due = float(match_due.group(1).replace(",", "")) if match_due else None
 
-        if total_due and billed:
-            rate_per_kwh = total_due / billed
+        # --- Extract Total kWh (from Billed/Diff Rdg) ---
+        match_kwh = re.search(r"Billed\s*:\s*(\d+)", text, re.IGNORECASE)
+        total_kwh = float(match_kwh.group(1)) if match_kwh else None
 
-        # --- Parse CURRENT CHARGES dynamically ---
-        lines = text.splitlines()
-        current_section = None
-        section_headers = ["GENERATION & TRANSMISSION", "DISTRIBUTION CHARGES", "OTHERS", "GOVERNMENT CHARGES", "UNIVERSAL CHARGE"]
-        for line in lines:
-            upper = line.upper()
-            if any(header in upper for header in section_headers):
-                current_section = line.strip()
-                charges[current_section] = []
-                continue
+        # --- Compute Rate per kWh ---
+        if total_due and total_kwh and total_kwh > 0:
+            rate_per_kwh = total_due / total_kwh
 
-            if current_section:
-                # Match charge with optional rate/unit
-                match = re.match(r"([A-Za-z\s\-\*\/&]+)\s+([-\d\.]+)?(?:/(kWh|month))?\s+([-\d,]+\.\d{2})", line)
-                if match:
-                    name = match.group(1).strip()
-                    rate = match.group(2) if match.group(2) else ""
-                    unit = match.group(3) if match.group(3) else ""
-                    amount = to_float(match.group(4))
-                    charges[current_section].append({
-                        "name": name,
-                        "rate": rate,
-                        "unit": unit,
-                        "amount": amount
-                    })
-                else:
-                    # Capture Sub-Total lines
-                    sub_total_match = re.match(r"Sub-Total\s+([-\d,]+\.\d{2})", line, re.IGNORECASE)
-                    if sub_total_match:
-                        amount = to_float(sub_total_match.group(1))
-                        charges[current_section].append({
-                            "name": "Sub-Total",
-                            "rate": "",
-                            "unit": "",
-                            "amount": amount
-                        })
+        # --- Extract CURRENT CHARGES sections + subtotals ---
+        charges_match = re.search(r"CURRENT CHARGES(.*?)CURRENT BILL", text, re.S | re.IGNORECASE)
+        if charges_match:
+            charges_block = charges_match.group(1)
 
-# --- Show Bill Summary ---
-st.markdown("### 📊 Bill Summary")
-cols = st.columns(2)
-if billed:
-    with cols[0]:
-        st.metric(label="🔌 Total kWh", value=f"{billed} kWh")
-if rate_per_kwh:
-    with cols[1]:
-        st.metric(label="⚡ Rate per kWh", value=f"{rate_per_kwh:.4f}")
+            # Capture section headers + subtotals
+            pattern = r"(?P<section>Generation & Transmission|Distribution Charges|Others|Government Charges).*?Sub-Total\s+([\d,]+\.\d{2})"
+            matches = re.finditer(pattern, charges_block, re.S | re.IGNORECASE)
 
-# --- Dynamic dropdown for Current Charges ---
-if charges:
-    st.markdown("### 📑 Current Charges")
-    section_selected = st.selectbox("Select Section to View", options=list(charges.keys()))
-    for item in charges[section_selected]:
-        rate_display = f" @ {item['rate']}/{item['unit']}" if item['unit'] else ""
-        amount_color = "#2c7be5" if item['amount'] >= 0 else "#d62828"
-        st.markdown(
-            f"""
-            <div style='
-                padding:8px;
-                border-radius:8px;
-                background:#f8f9fa;
-                margin-bottom:4px;
-                display:flex;
-                justify-content:space-between;
-                font-size:14px;
-            '>
-                <span><b>{item['name']}{rate_display}</b></span>
-                <span style='color:{amount_color}; font-weight:bold;'>₱{item['amount']:,.2f}</span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+            rows = []
+            for m in matches:
+                section = m.group("section").strip()
+                subtotal = float(m.group(2).replace(",", ""))
+                est_kwh = subtotal / rate_per_kwh if rate_per_kwh else None
+                rows.append([section, subtotal, est_kwh])
+
+            if rows:
+                df_sections = pd.DataFrame(rows, columns=["Section", "Sub-Total (₱)", "Est. kWh"])
+
+    # --- Show Results ---
+    st.subheader("📊 Bill Summary")
+    if total_kwh:
+        st.write(f"📊 **Total kWh (from bill):** {total_kwh:,.0f}")
+    if rate_per_kwh:
+        st.write(f"⚡ **Rate per kWh:** ₱{rate_per_kwh:,.2f}")
+
+    # --- Show Sections with Subtotals + Est kWh ---
+    if df_sections is not None:
+        with st.expander("📑 Current Charges Breakdown"):
+            df_display = df_sections.copy()
+            df_display["Sub-Total (₱)"] = df_display["Sub-Total (₱)"].map(lambda x: f"₱{x:,.2f}")
+            df_display["Est. kWh"] = df_display["Est. kWh"].map(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+            st.dataframe(df_display, use_container_width=True)
 
 # --- Manual Calculator ---
-st.markdown("### 🔢 Compute Your Own Usage")
-manual_kwh = st.number_input("Enter your kWh usage", value=0.0)
+st.subheader("🔢 Enter your kWh")
+manual_kwh = st.number_input("Enter your kWh usage", value=0.0, step=1.0)
 
 if st.button("💡 Compute My Bill"):
     if rate_per_kwh:
         computed = manual_kwh * rate_per_kwh
-        st.success(f"✅ Your Computed Bill: ₱{computed:,.2f}")
+        st.success(f"Your Computed Bill: ₱{computed:,.2f}")
     else:
-        st.error("⚠️ Upload a valid bill first.")
+        st.error("⚠️ Please upload a valid bill first.")
