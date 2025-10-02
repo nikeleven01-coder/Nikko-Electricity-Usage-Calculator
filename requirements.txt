@@ -1,3 +1,11 @@
 streamlit
 pdfplumber
 opencv-python-headless
+streamlit
+ultralytics
+opencv-python-headless
+pillow
+numpy
+streamlit-sortables
+webcolors
+scikit-learn
