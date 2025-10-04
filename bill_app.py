@@ -352,6 +352,23 @@ if "page" not in st.session_state:
 # Landing dashboard
 st.title("⚡ Utility Tools Dashboard")
 st.write("Select a tool below to get started:")
+st.markdown(
+    """
+    <style>
+    @media (max-width: 768px) {
+      [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+      [data-testid="stHorizontalBlock"] > div { width: 100% !important; }
+      .block-container { padding-left: 10px !important; padding-right: 10px !important; }
+    }
+    @media (max-width: 480px) {
+      [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+      [data-testid="stHorizontalBlock"] > div { width: 100% !important; }
+      .block-container { padding-left: 8px !important; padding-right: 8px !important; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -588,6 +605,7 @@ html_blocks = f"""
 <html>
 <head>
 <meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <style>
   /* Hide Streamlit emotion cache classes and file uploader preview */
   .st-emotion-cache-fis6aj,
@@ -602,6 +620,21 @@ html_blocks = f"""
   [data-testid="stFileUploader"] [data-testid="uploadedFiles"] {{ display: none !important; }}
   .stFileUploader .uploadedFile {{ display: none !important; }}
   .stFileUploader .uploadedFiles {{ display: none !important; }}
+  /* Responsive overrides */
+  @media (max-width: 768px) {
+    :root {{ --zoom: 1; --card-w: 180px; }}
+    .toolbar {{ flex-wrap: wrap; gap: 10px; padding: 8px 12px; }}
+    .folder-grid {{ grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }}
+    .folder-grid.grid-fixed {{ grid-template-columns: repeat(2, 1fr); }}
+    .btn, .add-folder-btn, .edit-btn {{ font-size: 13px; padding: 8px 12px; }}
+  }
+  @media (max-width: 480px) {
+    :root {{ --zoom: 0.9; --card-w: 150px; }}
+    .toolbar {{ flex-wrap: wrap; gap: 8px; padding: 8px 10px; }}
+    .folder-grid {{ grid-template-columns: 1fr; }}
+    .folder-grid.grid-fixed {{ grid-template-columns: 1fr; }}
+    .btn, .add-folder-btn, .edit-btn {{ font-size: 12px; padding: 8px 10px; }}
+  }
   
   :root {{ --zoom: 1; --card-w: 240px; }}
   body {{
