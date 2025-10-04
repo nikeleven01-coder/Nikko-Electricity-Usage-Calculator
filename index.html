@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smart Folder</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- Lucide icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Smart Folder</h1>
+    </header>
+
+    <section class="settings">
+      <div class="settings-row">
+        <label class="setting-label" for="detectMode">Detection</label>
+        <select id="detectMode" class="setting-input">
+          <option value="built-in">Built-in (fast)</option>
+          <option value="external">External API (max accuracy)</option>
+        </select>
+      </div>
+      <div id="externalConfig" class="settings-row hidden">
+        <label class="setting-label" for="apiUrl">API URL</label>
+        <input id="apiUrl" class="setting-input" type="text" placeholder="https://api.example.com/detect" />
+        <label class="setting-label" for="apiKey">API Key</label>
+        <input id="apiKey" class="setting-input" type="password" placeholder="Your API key" />
+      </div>
+    </section>
+
+    <section class="upload-section">
+      <div id="dropzone" class="dropzone" aria-label="Drag and drop files here">
+        <div class="dz-inner">
+          <i data-lucide="upload" class="icon"></i>
+          <p>Drag & drop files or</p>
+          <label for="fileInput" class="btn">Upload</label>
+          <input id="fileInput" type="file" multiple aria-label="Upload files" />
+        </div>
+      </div>
+    </section>
+
+    <main class="content">
+      <div id="folderGrid" class="grid" aria-live="polite"></div>
+    </main>
+
+    <!-- Floating Action Button -->
+    <div class="fab" aria-label="Actions">
+      <button id="fabMain" class="fab-main" aria-label="Main actions">
+        <span class="glow"></span>
+        <i data-lucide="sparkles" class="icon"></i>
+      </button>
+      <div class="fab-actions">
+        <button id="actionAdd" class="fab-btn" aria-label="Add Folder">
+          <i data-lucide="folder-plus" class="icon"></i>
+        </button>
+        <button id="actionEdit" class="fab-btn" aria-label="Edit Folder Name">
+          <i data-lucide="pencil" class="icon"></i>
+        </button>
+        <button id="actionDelete" class="fab-btn" aria-label="Delete Folder">
+          <i data-lucide="trash" class="icon"></i>
+        </button>
+        <button id="actionRandom" class="fab-btn" aria-label="Generate Random ID">
+          <i data-lucide="dice-6" class="icon"></i>
+        </button>
+        <button id="actionSwap" class="fab-btn" aria-label="Swap Selected Folders">
+          <i data-lucide="swap-horizontal" class="icon"></i>
+        </button>
+        <button id="actionExport" class="fab-btn" aria-label="Export Images">
+          <i data-lucide="download" class="icon"></i>
+        </button>
+        <div id="exportMenu" class="export-menu" aria-hidden="true" role="menu">
+          <button id="exportWith" class="menu-btn" role="menuitem">With Folders</button>
+          <button id="exportFlat" class="menu-btn" role="menuitem">Flattened</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./script.js"></script>
+    <script>
+      // Initialize icons
+      document.addEventListener('DOMContentLoaded', () => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      });
+    </script>
+  </body>
+  </html>
