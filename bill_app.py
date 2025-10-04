@@ -789,7 +789,53 @@ html_blocks = f"""
     /* Slightly smaller content cap for mobile */
     .list {{ max-height: calc(65vh); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }}
   }}
-</style>
+  /* Floating Action Button (bottom-right) */
+  .fab-container {{ position: fixed; bottom: 24px; right: 24px; z-index: 1000; pointer-events: none; }}
+  .fab-main {{ pointer-events: auto; width: 64px; height: 64px; border-radius: 50%; border: none; cursor: pointer; display: grid; place-items: center; 
+    background: #14b8a6; /* clean flat color */ box-shadow: 0 14px 28px rgba(0,0,0,0.22), 0 6px 12px rgba(0,0,0,0.12), 0 0 0 3px rgba(20, 184, 166, 0.25);
+    position: relative; overflow: hidden; transition: transform 220ms cubic-bezier(.22,1,.36,1), box-shadow 220ms cubic-bezier(.22,1,.36,1); }}
+  .fab-main::before {{ content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(120% 120% at 30% 15%, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.0) 50%); pointer-events: none; }}
+  .fab-main:hover {{ transform: translateY(-2px); box-shadow: 0 18px 32px rgba(0,0,0,0.25), 0 8px 16px rgba(0,0,0,0.14), 0 0 0 4px rgba(20, 184, 166, 0.35); }}
+  .fab-main:focus {{ outline: 2px solid rgba(20, 184, 166, 0.45); }}
+  .fab-icon {{ width: 28px; height: 28px; }}
+  .fab-menu {{ position: absolute; bottom: 72px; right: 0; display: grid; gap: 12px; opacity: 0; transform: translateY(10px); pointer-events: none; transition: all 280ms cubic-bezier(.22,1,.36,1); }}
+  .fab-container.open .fab-menu {{ opacity: 1; transform: translateY(0); pointer-events: auto; }}
+  .fab-container.open .fab-mini {{ animation: bounceIn 300ms cubic-bezier(.28,.84,.42,1); }}
+  @keyframes bounceIn {{ 0% {{ transform: translateY(8px) scale(0.96); opacity: 0.6; }} 60% {{ transform: translateY(-2px) scale(1.03); opacity: 1; }} 100% {{ transform: translateY(0) scale(1); }} }}
+  .fab-mini {{ width: 48px; height: 48px; border-radius: 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 2px solid rgba(255,255,255,0.10); display: grid; place-items: center; cursor: pointer; position: relative; box-shadow: 0 6px 12px rgba(0,0,0,0.14); }}
+  .fab-mini:hover {{ box-shadow: 0 8px 16px rgba(0,0,0,0.18); }}
+  .fab-mini:active {{ transform: translateY(-1px) scale(0.99); }}
+  .fab-label {{ position: absolute; bottom: -22px; left: 50%; transform: translateX(-50%); font-size: 14px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color: #222; text-shadow: 0 1px 1px rgba(255,255,255,0.25); }}
+  /* Mini button theme colors */
+  .fab-add {{ background: rgba(255, 241, 150, 0.65); }}
+  .fab-edit {{ background: rgba(173, 216, 255, 0.65); }}
+  .fab-del {{ background: rgba(255, 190, 190, 0.65); }}
+  .fab-rand {{ background: rgba(200, 180, 255, 0.65); }}
+
+  /* Tooltips */
+  [data-tooltip] {{ position: relative; }}
+  [data-tooltip]::after {{ content: attr(data-tooltip); position: absolute; bottom: 105%; left: 50%; transform: translateX(-50%); background: rgba(30,30,30,0.9); color: #fff; padding: 6px 8px; border-radius: 6px; font-size: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.30); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 160ms ease; }}
+  [data-tooltip]:hover::after {{ opacity: 1; }}
+
+  /* Ripple effect */
+  .ripple {{ position: absolute; border-radius: 50%; transform: scale(0); animation: ripple 600ms ease-out; background: rgba(255,255,255,0.4); }}
+  @keyframes ripple {{ to {{ transform: scale(4); opacity: 0; }} }}
+
+  /* Bottom export bar */
+  .bottom-export {{ position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; padding: 10px 14px; border-radius: 12px; 
+    background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 2px solid rgba(0,0,0,0.10); box-shadow: 0 8px 16px rgba(0,0,0,0.12); z-index: 900; }}
+  .bottom-export .export-btn {{ padding: 8px 12px; font-size: 14px; border-radius: 10px; border: none; cursor: pointer; background: #0f766e; color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.18); }}
+  .bottom-export .export-btn.secondary {{ background: #475569; }}
+
+  /* Dark mode */
+  @media (prefers-color-scheme: dark) {{
+    body {{ background: linear-gradient(180deg, #0b1020, #121a2a); color: #e7e9ee; }}
+    .fab-label {{ color: #e7e9ee; text-shadow: none; }}
+    .bottom-export {{ background: rgba(18,24,38,0.55); border-color: rgba(255,255,255,0.08); }}
+    .bottom-export .export-btn {{ background: #14b8a6; color: #071318; }}
+    .bottom-export .export-btn.secondary {{ background: #64748b; color: #0b1220; }}
+  }}
+  </style>
 
 <script src=\"https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js\"></script>
 </head>
@@ -800,9 +846,6 @@ html_blocks = f"""
     <button class=\"edit-btn\" id=\"editBtn\" onclick=\"toggleEdit()\">Edit</button>
     <button class=\"btn\" id=\"deleteBtn\" onclick=\"onDelete()\">Delete</button>
     <button class=\"btn\" id=\"randomBtn\" onclick=\"randomizeIds()\">Random_ID</button>
-    
-    <button class=\"btn\" id=\"exportBtn\" onclick=\"exportZip(false)\">Export (Folders)</button>
-    <button class=\"btn\" id=\"exportFlatBtn\" onclick=\"exportZip(true)\">Export (Flatten)</button>
     <span style=\"margin-left:auto; display:flex; align-items:center; gap:8px;\">
       <label style=\"font-size:13px;\" for=\"sortSelect\">Sort</label>
       <select id=\"sortSelect\" class=\"toolbar-select\">
@@ -824,6 +867,39 @@ html_blocks = f"""
     <div id=\"mainList\"></div>
   </div>
 
+  <!-- Floating Action Button -->
+  <div class=\"fab-container\" aria-label=\"Actions\">
+    <button class=\"fab-main\" id=\"fabMain\" data-tooltip=\"Actions\">
+      <svg class=\"fab-icon\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"> 
+        <path d=\"M12 5v14M5 12h14\" stroke=\"#ffffff\" stroke-width=\"2\" stroke-linecap=\"round\"/> 
+      </svg>
+    </button>
+    <div class=\"fab-menu\" id=\"fabMenu\" aria-hidden=\"true\">
+      <div class=\"fab-mini fab-add\" id=\"fabAdd\" data-tooltip=\"Add Folder\" onclick=\"addFolder()\">
+        <svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z\" stroke=\"#664c00\" stroke-width=\"1.6\"/><path d=\"M12 11v6M9 14h6\" stroke=\"#664c00\" stroke-width=\"1.6\" stroke-linecap=\"round\"/></svg>
+        <span class=\"fab-label\">Add Folder</span>
+      </div>
+      <div class=\"fab-mini fab-edit\" id=\"fabEdit\" data-tooltip=\"Edit\" onclick=\"toggleEdit()\">
+        <svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z\" stroke=\"#1e3a8a\" stroke-width=\"1.6\"/><path d=\"M14.06 6.19l3.75 3.75\" stroke=\"#1e3a8a\" stroke-width=\"1.6\"/></svg>
+        <span class=\"fab-label\">Edit</span>
+      </div>
+      <div class=\"fab-mini fab-del\" id=\"fabDel\" data-tooltip=\"Delete\" onclick=\"onDelete()\">
+        <svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M6 7h12M9 7V5h6v2M10 10v8M14 10v8\" stroke=\"#7f1d1d\" stroke-width=\"1.6\" stroke-linecap=\"round\"/></svg>
+        <span class=\"fab-label\">Delete</span>
+      </div>
+      <div class=\"fab-mini fab-rand\" id=\"fabRand\" data-tooltip=\"Random_ID\" onclick=\"randomizeIds()\">
+        <svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\" stroke=\"#4c1d95\" stroke-width=\"1.6\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\" stroke=\"#4c1d95\" stroke-width=\"1.6\"/><circle cx=\"7\" cy=\"7\" r=\"1.2\" fill=\"#4c1d95\"/><circle cx=\"17.5\" cy=\"17.5\" r=\"1.2\" fill=\"#4c1d95\"/></svg>
+        <span class=\"fab-label\">Random_ID</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Export Bar -->
+  <div class=\"bottom-export\">
+    <button class=\"export-btn\" onclick=\"exportZip(false)\">Export (Folders)</button>
+    <button class=\"export-btn secondary\" onclick=\"exportZip(true)\">Export (Flatten)</button>
+  </div>
+
   <div class=\"modal-backdrop\" id=\"modalBackdrop\" style=\"position:fixed; inset:0; background:rgba(0,0,0,0.4); display:none; align-items:center; justify-content:center; z-index:500;\">
     <div class=\"modal\" style=\"background:#fff; border-radius:8px; padding:16px; width:420px; box-shadow:0 10px 30px rgba(0,0,0,0.2);\">
       <h3 id=\"modalTitle\" style=\"margin:0 0 10px 0;\">Confirm Batch Edit</h3>
@@ -840,6 +916,30 @@ html_blocks = f"""
   </div>
 
 <script>
+// FAB init and ripple
+document.addEventListener('DOMContentLoaded', () => {{
+  const fabContainer = document.querySelector('.fab-container');
+  const fabMain = document.getElementById('fabMain');
+  if (fabMain && fabContainer) {{
+    fabMain.addEventListener('click', (e) => {{ addRipple(e.currentTarget, e); fabContainer.classList.toggle('open'); }});
+  }}
+  document.querySelectorAll('.fab-mini').forEach(btn => {{
+    btn.addEventListener('click', (e) => addRipple(e.currentTarget, e));
+  }});
+  function addRipple(target, evt) {{
+    const rect = target.getBoundingClientRect();
+    const ripple = document.createElement('span');
+    const size = Math.max(rect.width, rect.height);
+    ripple.className = 'ripple';
+    ripple.style.width = ripple.style.height = size + 'px';
+    const x = evt.clientX - rect.left - size/2;
+    const y = evt.clientY - rect.top - size/2;
+    ripple.style.left = x + 'px';
+    ripple.style.top = y + 'px';
+    target.appendChild(ripple);
+    setTimeout(() => ripple.remove(), 600);
+  }}
+}});
 const data = {json.dumps(blocks_data)};
 const PALETTE = {json.dumps({k:v for k,v in FASHION_COLORS.items()})};
 const mainList = document.getElementById('mainList');
@@ -1648,6 +1748,7 @@ function createFolder(name = "New Folder") {{
     fallbackTolerance: 3,
     touchStartThreshold: 4,
     dragoverBubble: true,
+    onAdd: onItemAdded,
     onEnd: onDragEnd
   }});
   setupHeaderDrop(header, folder, list);
@@ -1841,6 +1942,7 @@ Sortable.create(mainList, {{
   fallbackTolerance: 3,
   touchStartThreshold: 4,
   dragoverBubble: true,
+  onAdd: onItemAdded,
   onEnd: onDragEnd
 }});
 
@@ -2036,6 +2138,45 @@ function onDragEnd(evt) {{
   }}
 
   // Align images to folders by Unique_ID prefix
+  syncByPrefix();
+  sendOrder();
+}}
+
+// Fire on cross-list add to ensure destination properties and numbering update instantly
+function onItemAdded(evt) {{
+  const dragged = evt.item;
+  const toList = evt.to;
+  const fromList = evt.from;
+
+  // If dragging one of multiple selected, bring the rest along
+  if (dragged.classList.contains('selected') && selectedIds.size > 1) {{
+    const ids = Array.from(selectedIds);
+    for (const id of ids) {{
+      if (id === dragged.dataset.id) continue;
+      const other = document.querySelector(`.block[data-id="${{id}}"]`);
+      if (other && other.parentElement !== toList) {{
+        other.parentElement?.removeChild(other);
+        toList.appendChild(other);
+      }}
+    }}
+  }}
+
+  const targetFolder = toList.closest('.folder');
+  if (targetFolder) {{
+    const tName = (targetFolder.querySelector('.folder-title')?.value || '').trim();
+    const moved = Array.from(toList.querySelectorAll('.block'));
+    for (const b of moved) {{
+      if (b === dragged || b.classList.contains('selected')) {{
+        b.dataset.clothType = tName;
+        ensureUidPrefixKeepDigits(b, tName, toList);
+        updateFilenameKeepNumbering(b);
+      }}
+    }}
+    renumber(toList, tName, false);
+    updateBadge(targetFolder);
+  }}
+  const sourceFolder = fromList ? fromList.closest('.folder') : null;
+  if (sourceFolder) updateBadge(sourceFolder);
   syncByPrefix();
   sendOrder();
 }}
