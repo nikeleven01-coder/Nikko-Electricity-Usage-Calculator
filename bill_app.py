@@ -212,9 +212,11 @@ body {
   max-height: 500px;
   overflow-y: auto;
 }
-.content-inner { padding: 18px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-/* Ensure consistent two-per-row thumbnails and square sizing */
-.folder .content-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.content-inner { padding: 18px; display: grid; grid-template-columns: 1fr; gap: 14px; }
+/* Responsive: mobile 1 per row, desktop 2 per row */
+@media (min-width: 1024px) {
+  .content-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .file-cell .thumb {
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -226,7 +228,8 @@ body {
 .file-cell .thumb img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center;
   display: block;
 }
 /* Inline file name and color picker under each thumbnail */
