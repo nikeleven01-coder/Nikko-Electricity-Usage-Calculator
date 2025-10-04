@@ -343,7 +343,7 @@ body {
   display: grid; place-items: center; cursor: pointer; position: relative;
   z-index: 10001;
   pointer-events: auto; /* clickable even though parent ignores events */
-  touch-action: none; /* allow drag without scrolling on mobile */
+  touch-action: manipulation; /* responsive tap without interfering with scroll */
   box-shadow:
     0 22px 42px rgba(0,0,0,0.5),
     0 0 0 2px rgba(124,92,255,0.15),
@@ -901,72 +901,15 @@ document.addEventListener('touchmove',(e)=>{
   if(thumbEl){ thumbEl.classList.add('drop-target'); touchHoverId=thumbEl.dataset.imgId||null; } else { touchHoverId=null; }
 }, {passive:false});
 
-// Draggable FabMain: allow dragging anywhere and persist position
+// Ensure FAB anchors bottom-right across devices; clear any stale overrides
 (() => {
-  const clamp=(v,min,max)=>Math.max(min, Math.min(max, v));
-  const saved=localStorage.getItem('fabPos');
-  if(saved){
-    try{
-      const pos=JSON.parse(saved);
-      if(typeof pos.left==='number' && typeof pos.top==='number'){
-        dom.fab.style.left=`${pos.left}px`;
-        dom.fab.style.top=`${pos.top}px`;
-        dom.fab.style.right='auto';
-        dom.fab.style.bottom='auto';
-      }
-    }catch(_){/* ignore bad storage */}
+  if (dom.fab) {
+    dom.fab.style.left = '';
+    dom.fab.style.top = '';
+    dom.fab.style.right = '';
+    dom.fab.style.bottom = '';
   }
-  let dragging=false, moved=false, offsetX=0, offsetY=0, suppressNextClick=false;
-  function beginDrag(clientX, clientY){
-    const rect=dom.fab.getBoundingClientRect();
-    offsetX=clientX-rect.left; offsetY=clientY-rect.top;
-    dragging=true; moved=false;
-    document.body.style.userSelect='none';
-  }
-  function updateDrag(clientX, clientY){
-    if(!dragging) return;
-    moved=true;
-    const vw=window.innerWidth, vh=window.innerHeight;
-    const rect=dom.fab.getBoundingClientRect();
-    const w=rect.width, h=rect.height;
-    let left=clientX-offsetX; let top=clientY-offsetY;
-    left=clamp(left, 0, vw-w); top=clamp(top, 0, vh-h);
-    dom.fab.style.left=`${left}px`; dom.fab.style.top=`${top}px`;
-    dom.fab.style.right='auto'; dom.fab.style.bottom='auto';
-  }
-  function endDrag(){
-    if(!dragging) return;
-    dragging=false; document.body.style.userSelect='';
-    if(moved){
-      suppressNextClick=true;
-      const rect=dom.fab.getBoundingClientRect();
-      localStorage.setItem('fabPos', JSON.stringify({left: rect.left, top: rect.top}));
-    }
-    moved=false;
-  }
-  // Pointer events (mouse + touch)
-  dom.fabMain.addEventListener('pointerdown',(e)=>{ e.preventDefault(); e.stopPropagation(); beginDrag(e.clientX, e.clientY); try{ dom.fabMain.setPointerCapture(e.pointerId);}catch(_){} });
-  dom.fabMain.addEventListener('pointermove',(e)=>{ if(!dragging) return; e.preventDefault(); e.stopPropagation(); updateDrag(e.clientX, e.clientY); });
-  dom.fabMain.addEventListener('pointerup',(e)=>{ e.preventDefault(); e.stopPropagation(); endDrag(); try{ dom.fabMain.releasePointerCapture(e.pointerId);}catch(_){} });
-  dom.fabMain.addEventListener('pointercancel',(e)=>{ e.preventDefault(); e.stopPropagation(); endDrag(); });
-  // Suppress click toggle when just dragged
-  const originalClickHandler = (e)=>{ e.stopPropagation(); dom.fab?.classList.toggle('open'); };
-  dom.fabMain.removeEventListener('click', originalClickHandler);
-  dom.fabMain.addEventListener('click',(e)=>{
-    if(suppressNextClick){ suppressNextClick=false; e.preventDefault(); e.stopPropagation(); return; }
-    e.stopPropagation(); dom.fab?.classList.toggle('open');
-  });
-  // Clamp and persist on resize
-  window.addEventListener('resize',()=>{
-    const rect=dom.fab.getBoundingClientRect();
-    const vw=window.innerWidth, vh=window.innerHeight;
-    const w=rect.width, h=rect.height;
-    const left=clamp(rect.left, 0, vw-w);
-    const top=clamp(rect.top, 0, vh-h);
-    dom.fab.style.left=`${left}px`; dom.fab.style.top=`${top}px`;
-    dom.fab.style.right='auto'; dom.fab.style.bottom='auto';
-    localStorage.setItem('fabPos', JSON.stringify({left, top}));
-  });
+  try { localStorage.removeItem('fabPos'); } catch(_) {}
 })();
 
 function downloadImages(withFolders){
