@@ -1,154 +1,4 @@
-import streamlit as st
-import pdfplumber
-import re
-import pandas as pd
-
-# ----------------------------------------
-# APP CONFIG
-# ----------------------------------------
-st.set_page_config(page_title="Utility Dashboard", page_icon="⚡", layout="centered")
-
-# ----------------------------------------
-# DASHBOARD TITLE
-# ----------------------------------------
-st.title("⚡ Utility Tools Dashboard")
-
-st.write("Select a tool below to get started:")
-
-# ----------------------------------------
-# 3x2 TILE GRID
-# ----------------------------------------
-col1, col2, col3 = st.columns(3)
-
-# --- Tile 1 (Active App) ---
-with col1:
-    if st.button("💡 Electric Bill Calculator", use_container_width=True):
-        st.session_state["page"] = "bill_app"
-
-# --- Coming Soon Tiles ---
-with col2:
-    st.button("🧮 Coming Soon", use_container_width=True)
-
-with col3:
-    st.button("📊 Coming Soon", use_container_width=True)
-
-col4, col5, col6 = st.columns(3)
-with col4:
-    st.button("🔋 Coming Soon", use_container_width=True)
-
-with col5:
-    st.button("🌤️ Coming Soon", use_container_width=True)
-
-with col6:
-    st.button("⚙️ Coming Soon", use_container_width=True)
-
-# ----------------------------------------
-# BILL APP PAGE (ONLY SHOWS WHEN CLICKED)
-# ----------------------------------------
-if "page" not in st.session_state:
-    st.session_state["page"] = None
-
-if st.session_state["page"] == "bill_app":
-    st.markdown("---")
-    st.header("💡 Electric Bill Calculator")
-
-    # Tabs
-    tab1, tab2 = st.tabs(["📄 Upload Bill", "✍️ Manual Input"])
-
-    # ===========================================
-    # TAB 1: UPLOAD BILL
-    # ===========================================
-    with tab1:
-        uploaded_file = st.file_uploader("📂 Upload your electric bill (PDF)", type="pdf")
-
-        total_kwh = None
-        rate_per_kwh = None
-        df_sections = None
-
-        if uploaded_file:
-            with pdfplumber.open(uploaded_file) as pdf:
-                text = ""
-                for page in pdf.pages:
-                    if page.extract_text():
-                        text += page.extract_text() + "\n"
-
-                # --- Extract TOTAL AMOUNT DUE ---
-                match_due = re.search(r"TOTAL AMOUNT DUE\s+([\d,]+\.\d{2})", text, re.IGNORECASE)
-                total_due = float(match_due.group(1).replace(",", "")) if match_due else None
-
-                # --- Extract Total kWh ---
-                match_kwh = re.search(r"Billed\s*:\s*(\d+)", text, re.IGNORECASE)
-                total_kwh = float(match_kwh.group(1)) if match_kwh else None
-
-                # --- Compute Rate per kWh ---
-                if total_due and total_kwh and total_kwh > 0:
-                    rate_per_kwh = total_due / total_kwh
-
-                # --- Extract CURRENT CHARGES + Subtotals ---
-                charges_match = re.search(r"CURRENT CHARGES(.*?)CURRENT BILL", text, re.S | re.IGNORECASE)
-                if charges_match:
-                    charges_block = charges_match.group(1)
-                    pattern = r"(?P<section>Generation & Transmission|Distribution Charges|Others|Government Charges).*?Sub-Total\s+([\d,]+\.\d{2})"
-                    matches = re.finditer(pattern, charges_block, re.S | re.IGNORECASE)
-
-                    rows = []
-                    for m in matches:
-                        section = m.group("section").strip()
-                        subtotal = float(m.group(2).replace(",", ""))
-                        est_kwh = subtotal / rate_per_kwh if rate_per_kwh else None
-                        rows.append([section, subtotal, est_kwh])
-
-                    if rows:
-                        df_sections = pd.DataFrame(rows, columns=["Section", "Sub-Total (₱)", "Est. kWh"])
-
-            # --- Display Results ---
-            st.subheader("📊 Bill Summary")
-            if total_kwh:
-                st.write(f"📏 **Total kWh (from bill):** {total_kwh:,.0f}")
-            if rate_per_kwh:
-                st.write(f"⚡ **Rate per kWh:** ₱{rate_per_kwh:,.2f}")
-
-            if df_sections is not None:
-                with st.expander("📑 Current Charges Breakdown"):
-                    df_display = df_sections.copy()
-                    df_display["Sub-Total (₱)"] = df_display["Sub-Total (₱)"].map(lambda x: f"₱{x:,.2f}")
-                    df_display["Est. kWh"] = df_display["Est. kWh"].map(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
-                    st.dataframe(df_display, use_container_width=True)
-
-            # --- Calculator (based on uploaded bill) ---
-            st.subheader("🔢 Enter Your Own kWh Usage")
-            manual_kwh = st.number_input("Enter your kWh usage", value=0.0, step=1.0)
-            if st.button("💡 Compute My Bill"):
-                if rate_per_kwh:
-                    computed = manual_kwh * rate_per_kwh
-                    st.success(f"💰 Your Computed Bill: ₱{computed:,.2f}")
-                else:
-                    st.error("⚠️ Please upload a valid bill first.")
-
-    # ===========================================
-    # TAB 2: MANUAL INPUT
-    # ===========================================
-    with tab2:
-        st.subheader("🧮 Manual Entry Mode")
-        st.write("Manually input your **Diff Rdg (kWh)** and **Total Amount Due** below:")
-
-        manual_diff_rdg = st.number_input("📏 Diff Rdg (kWh)", value=0.0, step=1.0)
-        manual_total_due = st.number_input("💰 Total Amount Due (₱)", value=0.0, step=0.01)
-
-        if manual_diff_rdg > 0 and manual_total_due > 0:
-            manual_rate_per_kwh = manual_total_due / manual_diff_rdg
-            st.info(f"⚡ Computed Rate per kWh: ₱{manual_rate_per_kwh:,.2f}")
-
-            st.subheader("🔢 Try New Usage")
-            new_kwh = st.number_input("Enter new kWh usage", value=0.0, step=1.0, key="manual_input")
-            if st.button("💡 Compute My Manual Bill"):
-                computed_manual = new_kwh * manual_rate_per_kwh
-                st.success(f"💰 Your Computed Bill: ₱{computed_manual:,.2f}")
-        else:
-            st.warning("Please enter both Diff Rdg and Total Due to calculate rate.")
-            
-            
-            # smart_cloth_renamer_grid_folders_fixed.py
+# smart_cloth_renamer_grid_folders_fixed.py
 
 import streamlit as st
 import os, zipfile, tempfile, re, json, base64
@@ -159,14 +9,30 @@ import cv2
 from ultralytics import YOLO
 import streamlit.components.v1 as components
 from collections import defaultdict
+import pdfplumber
+import pandas as pd
 
 # ---------------- Constants ---------------- #
 FASHION_COLORS = {
+    # Core existing colors
     "Pine Cone": "#556a5f", "Viridian Green": "#009698", "Navy Blue": "#000080",
     "Burgundy": "#800020", "Rose Gold": "#b76e79", "Neon Green": "#39ff14",
     "Champagne": "#f7e7ce", "Emerald Green": "#50c878", "Sky Blue": "#87ceeb",
     "Charcoal": "#36454f", "Ivory": "#fffff0", "Orange": "#ffa500",
     "Pink": "#ffc0cb", "Gold": "#ffd700", "Beige": "#f5f5dc", "Brown": "#a52a2a",
+
+    # Added common tones and shades
+    "Black": "#000000", "White": "#ffffff",
+    "Gray": "#808080", "Light Gray": "#d3d3d3", "Dark Gray": "#404040",
+    "Red": "#ff0000", "Crimson": "#dc143c",
+    "Purple": "#800080", "Lavender": "#e6e6fa", "Indigo": "#4b0082", "Violet": "#8f00ff",
+    "Blue": "#0000ff", "Royal Blue": "#4169e1", "Cobalt": "#0047ab",
+    "Teal": "#008080", "Turquoise": "#40e0d0", "Aquamarine": "#7fffd4",
+    "Green": "#008000", "Forest Green": "#228b22", "Olive": "#808000", "Mint": "#98ff98", "Lime": "#00ff00",
+    "Yellow": "#ffff00", "Mustard": "#ffdb58",
+    "Peach": "#ffe5b4", "Coral": "#ff7f50", "Salmon": "#fa8072",
+    "Tan": "#d2b48c", "Khaki": "#f0e68c",
+    "Silver": "#c0c0c0", "Bronze": "#cd7f32", "Copper": "#b87333",
 }
 
 STYLE_MAP = {
@@ -183,7 +49,22 @@ def hex_to_rgb_tuple(hex_str):
     return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
 
 def rgb_to_lab(rgb):
-    arr = np.uint8([[[rgb[0], rgb[1], rgb[2]]]])
+    """Robust conversion from an RGB tuple/list/array to LAB.
+    Handles None, malformed lengths, numpy arrays, and out-of-range values.
+    """
+    if rgb is None:
+        r = g = b = 0
+    else:
+        try:
+            # Support numpy arrays and sequences
+            r, g, b = (int(np.clip(rgb[0], 0, 255)),
+                       int(np.clip(rgb[1], 0, 255)),
+                       int(np.clip(rgb[2], 0, 255)))
+        except Exception:
+            # Fallback if rgb is scalar or shorter than 3
+            val = int(np.clip(rgb, 0, 255)) if np.isscalar(rgb) else 0
+            r = g = b = val
+    arr = np.uint8([[[r, g, b]]])
     return cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0, 0].astype(float)
 
 def nearest_palette_name(rgb):
@@ -368,8 +249,10 @@ def detect_and_get_color(file_like):
 
 
 # ---------------- Export Functions ---------------- #
-def create_export_zip(order_data, items):
-    """Create ZIP file from order data and items."""
+def create_export_zip(order_data, items, flatten=False):
+    """Create ZIP file from order data and items.
+    If flatten is True, all images are stored at zip root without folder directories.
+    """
     try:
         if not items:
             st.warning("No items to export")
@@ -389,6 +272,12 @@ def create_export_zip(order_data, items):
                 original = item_lookup.get(str(it["id"]))
                 if original and "pil" in original:
                     out_path = os.path.join(td, it["filename"])
+                    # Avoid overwrite collisions when flattening or duplicate names
+                    base, ext = os.path.splitext(out_path)
+                    n = 2
+                    while os.path.exists(out_path):
+                        out_path = f"{base} ({n}){ext}"
+                        n += 1
                     original["pil"].save(out_path)
                     files_added += 1
             
@@ -396,11 +285,18 @@ def create_export_zip(order_data, items):
             for fo in folders:
                 folder_name = fo.get("title") or "Folder"
                 folder_dir = os.path.join(td, folder_name)
-                os.makedirs(folder_dir, exist_ok=True)
+                if not flatten:
+                    os.makedirs(folder_dir, exist_ok=True)
                 for it in fo.get("items", []):
                     original = item_lookup.get(str(it["id"]))
                     if original and "pil" in original:
-                        out_path = os.path.join(folder_dir, it["filename"])
+                        out_path = os.path.join(td if flatten else folder_dir, it["filename"])
+                        # Avoid overwrite collisions when flattening or duplicate names
+                        base, ext = os.path.splitext(out_path)
+                        n = 2
+                        while os.path.exists(out_path):
+                            out_path = f"{base} ({n}){ext}"
+                            n += 1
                         original["pil"].save(out_path)
                         files_added += 1
             
@@ -429,21 +325,185 @@ def assign_filenames(items):
     grouped = defaultdict(list)
     for it in items:
         unique_code = f"C{1000 + it['id']}"
-        raw_style = it["cloth_style"].lower()
-        cloth_style = STYLE_MAP.get(raw_style, raw_style.capitalize())
+        raw_style = (it.get("cloth_style") or "").lower()
+        base_style = (it.get("cloth_style") or "")
+        cloth_style = STYLE_MAP.get(raw_style, base_style.replace(" ", "_").capitalize())
         color_name = it["color"].replace(" ", "_")
         base_name = f"{unique_code}_{cloth_style}_{color_name}"
         grouped[base_name].append(it)
     for base, group in grouped.items():
         total = len(group)
         for idx, it in enumerate(group, start=1):
-            it["filename"] = f"{base}_{idx} of {total}.jpg"
+            ext = it.get("ext", ".jpg")
+            it["filename"] = f"{base} {idx} of {total}{ext}"
     return items
 
 
+#############################
+# -------- Dashboard --------
+#############################
+# Use a single page config for the whole app
+st.set_page_config(page_title="Utility Dashboard", page_icon="⚡", layout="wide")
+
+# Initialize routing state
+if "page" not in st.session_state:
+    st.session_state["page"] = None
+
+# Landing dashboard
+st.title("⚡ Utility Tools Dashboard")
+st.write("Select a tool below to get started:")
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("💡 Electric Bill Calculator", use_container_width=True):
+        st.session_state["page"] = "bill_app"
+with col2:
+    if st.button("👗 Cloth Renamer & Organizer", use_container_width=True):
+        st.session_state["page"] = "renamer_app"
+with col3:
+    st.button("📊 Coming Soon", use_container_width=True)
+
+col4, col5, col6 = st.columns(3)
+with col4:
+    st.button("🔋 Coming Soon", use_container_width=True)
+with col5:
+    st.button("🌤️ Coming Soon", use_container_width=True)
+with col6:
+    st.button("⚙️ Coming Soon", use_container_width=True)
+
+# ---------------- Bill App Page ---------------- #
+if st.session_state["page"] == "bill_app":
+    st.markdown("---")
+    st.header("💡 Electric Bill Calculator")
+
+    tab1, tab2 = st.tabs(["📄 Upload Bill", "✍️ Manual Input"]) 
+
+    # TAB 1: UPLOAD BILL
+    with tab1:
+        uploaded_file = st.file_uploader("📂 Upload your electric bill (PDF)", type="pdf")
+
+        total_kwh = None
+        rate_per_kwh = None
+        df_sections = None
+
+        if uploaded_file:
+            with pdfplumber.open(uploaded_file) as pdf:
+                text = ""
+                for page in pdf.pages:
+                    if page.extract_text():
+                        text += page.extract_text() + "\n"
+
+                # Extract TOTAL AMOUNT DUE
+                match_due = re.search(r"TOTAL AMOUNT DUE\s+([\d,]+\.\d{2})", text, re.IGNORECASE)
+                total_due = float(match_due.group(1).replace(",", "")) if match_due else None
+
+                # Extract Total kWh
+                match_kwh = re.search(r"Billed\s*:\s*(\d+)", text, re.IGNORECASE)
+                total_kwh = float(match_kwh.group(1)) if match_kwh else None
+
+                # Compute Rate per kWh
+                if total_due and total_kwh and total_kwh > 0:
+                    rate_per_kwh = total_due / total_kwh
+
+                # Extract CURRENT CHARGES + Subtotals
+                charges_match = re.search(r"CURRENT CHARGES(.*?)CURRENT BILL", text, re.S | re.IGNORECASE)
+                if charges_match:
+                    charges_block = charges_match.group(1)
+                    pattern = r"(?P<section>Generation & Transmission|Distribution Charges|Others|Government Charges).*?Sub-Total\s+([\d,]+\.\d{2})"
+                    matches = re.finditer(pattern, charges_block, re.S | re.IGNORECASE)
+
+                    rows = []
+                    for m in matches:
+                        section = m.group("section").strip()
+                        subtotal = float(m.group(2).replace(",", ""))
+                        est_kwh = subtotal / rate_per_kwh if rate_per_kwh else None
+                        rows.append([section, subtotal, est_kwh])
+
+                    if rows:
+                        df_sections = pd.DataFrame(rows, columns=["Section", "Sub-Total (₱)", "Est. kWh"]) 
+
+        # Display Results
+        st.subheader("📊 Bill Summary")
+        if total_kwh:
+            st.write(f"📏 **Total kWh (from bill):** {total_kwh:,.0f}")
+        if rate_per_kwh:
+            st.write(f"⚡ **Rate per kWh:** ₱{rate_per_kwh:,.2f}")
+
+        if df_sections is not None:
+            with st.expander("📑 Current Charges Breakdown"):
+                df_display = df_sections.copy()
+                df_display["Sub-Total (₱)"] = df_display["Sub-Total (₱)"] .map(lambda x: f"₱{x:,.2f}")
+                df_display["Est. kWh"] = df_display["Est. kWh"].map(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+                st.dataframe(df_display, use_container_width=True)
+
+        # Calculator (based on uploaded bill)
+        st.subheader("🔢 Enter Your Own kWh Usage")
+        manual_kwh = st.number_input("Enter your kWh usage", value=0.0, step=1.0)
+        if st.button("💡 Compute My Bill"):
+            if rate_per_kwh:
+                computed = manual_kwh * rate_per_kwh
+                st.success(f"💰 Your Computed Bill: ₱{computed:,.2f}")
+            else:
+                st.error("⚠️ Please upload a valid bill first.")
+
+    # TAB 2: MANUAL INPUT
+    with tab2:
+        st.subheader("🧮 Manual Entry Mode")
+        st.write("Manually input your **Diff Rdg (kWh)** and **Total Amount Due** below:")
+
+        manual_diff_rdg = st.number_input("📏 Diff Rdg (kWh)", value=0.0, step=1.0)
+        manual_total_due = st.number_input("💰 Total Amount Due (₱)", value=0.0, step=0.01)
+
+        if manual_diff_rdg > 0 and manual_total_due > 0:
+            manual_rate_per_kwh = manual_total_due / manual_diff_rdg
+            st.info(f"⚡ Computed Rate per kWh: ₱{manual_rate_per_kwh:,.2f}")
+
+            st.subheader("🔢 Try New Usage")
+            new_kwh = st.number_input("Enter new kWh usage", value=0.0, step=1.0, key="manual_input")
+            if st.button("💡 Compute My Manual Bill"):
+                computed_manual = new_kwh * manual_rate_per_kwh
+                st.success(f"💰 Your Computed Bill: ₱{computed_manual:,.2f}")
+
+# If not on the renamer app, stop before running its UI
+if st.session_state.get("page") != "renamer_app":
+    st.stop()
+
 # ---------------- UI ---------------- #
-st.set_page_config(layout="wide")
+# Renamer app title
 st.title("Cloth Renamer & Organizer")
+
+# Hide uploaded file list and pagination near the drag-and-drop uploader
+st.markdown(
+    """
+    <style>
+    /* Hide uploaded file list items and paginator under the FileUploader */
+    [data-testid="stFileUploader"] [data-testid*="uploaded"] { display: none !important; }
+    [data-testid="stFileUploader"] [data-testid*="Uploaded"] { display: none !important; }
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderUploadedFiles"] { display: none !important; }
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"] { display: none !important; }
+    [data-testid="stFileUploader"] [data-testid*="Paginator"] { display: none !important; }
+    [data-testid="stFileUploader"] [data-baseweb="pagination"] { display: none !important; }
+    [data-testid="stFileUploader"] div[aria-live="polite"] { display: none !important; }
+    /* Hide any extra children beyond the first dropzone container */
+    [data-testid="stFileUploader"] > div > div:not(:first-child) { display: none !important; }
+    [data-testid="stFileUploader"] > div > :not(:first-child) { display: none !important; }
+    [data-testid="stFileUploader"] > div > div > :not(:first-child) { display: none !important; }
+    /* Hide lists and status regions */
+    [data-testid="stFileUploader"] [role="list"],
+    [data-testid="stFileUploader"] [role="status"],
+    [data-testid="stFileUploader"] [aria-live] { display: none !important; }
+    /* Hide any list container adjacent to dropzone instructions */
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] + div { display: none !important; }
+    /* Keep only the dropzone visible; hide everything else inside the uploader */
+    [data-testid="stFileUploader"] * { display: none !important; }
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] { display: block !important; }
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] * { display: initial !important; }
+    /* Also hide any global BaseWeb pagination components that might appear */
+    [data-baseweb="pagination"] { display: none !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 uploaded_files = st.file_uploader(
     "Upload images or a ZIP",
@@ -451,13 +511,7 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-default_folder_name = st.session_state.get("folder_name")
-if not default_folder_name:
-    if uploaded_files and len(uploaded_files) == 1 and uploaded_files[0].name.lower().endswith(".zip"):
-        default_folder_name = os.path.splitext(uploaded_files[0].name)[0]
-    else:
-        default_folder_name = "New Folder"
-folder_name = st.text_input("Folder name", value=default_folder_name, key="folder_name")
+
 
 if "items" not in st.session_state:
     st.session_state["items"] = []
@@ -480,6 +534,7 @@ if uploaded_files:
                             mean_rgb, pname, pil, cloth_style = detect_and_get_color(fh)
                             if mean_rgb:
                                 small_b64 = image_to_base64(pil.resize((80, 80)))
+                                ext = os.path.splitext(fname)[1].lower() or ".jpg"
                                 st.session_state["items"].append({
                                     "id": idx_counter,
                                     "color": pname,
@@ -487,12 +542,14 @@ if uploaded_files:
                                     "image_b64": small_b64,
                                     "pil": pil.copy(),
                                     "cloth_style": cloth_style,
+                                    "ext": ext,
                                 })
                                 idx_counter += 1
         else:
             mean_rgb, pname, pil, cloth_style = detect_and_get_color(f)
             if mean_rgb:
                 small_b64 = image_to_base64(pil.resize((80, 80)))
+                ext = os.path.splitext(f.name)[1].lower() or ".jpg"
                 st.session_state["items"].append({
                     "id": idx_counter,
                     "color": pname,
@@ -500,6 +557,7 @@ if uploaded_files:
                     "image_b64": small_b64,
                     "pil": pil.copy(),
                     "cloth_style": cloth_style,
+                    "ext": ext,
                 })
                 idx_counter += 1
 
@@ -511,12 +569,13 @@ if not items:
 blocks_data = [{
     "id": it["id"],
     "unique_id": f"C{1000 + it['id']}",
-    "cloth_type": STYLE_MAP.get((it["cloth_style"] or "").lower(), (it["cloth_style"] or "").replace(" ", "_").capitalize()),
+    "cloth_type": (lambda ct: ct if ct else (folder_name or "New Folder"))(STYLE_MAP.get((it["cloth_style"] or "").lower(), (it["cloth_style"] or "").replace(" ", "_").capitalize())),
     "color_raw": it["color"],
     "color_norm": it["color"].replace(" ", "_").lower(),
     "rgb": it["rgb"],
     "img": it["image_b64"],
     "filename": it["filename"],
+    "ext": it.get("ext", ".jpg"),
 } for it in items]
 
 html_blocks = f"""
@@ -533,8 +592,13 @@ html_blocks = f"""
   .stFileUploader [data-testid="stFileUploaderDropzoneInstructions"] + div {{
     display: none !important;
   }}
+  /* Hide uploaded file list items near the dropzone */
+  [data-testid="stFileUploader"] [data-testid="uploadedFile"] {{ display: none !important; }}
+  [data-testid="stFileUploader"] [data-testid="uploadedFiles"] {{ display: none !important; }}
+  .stFileUploader .uploadedFile {{ display: none !important; }}
+  .stFileUploader .uploadedFiles {{ display: none !important; }}
   
-  :root {{ --zoom: 1; }}
+  :root {{ --zoom: 1; --card-w: 240px; }}
   body {{
     margin:0; padding:0; font-family:sans-serif; background:#f7f7f7;
   }}
@@ -548,57 +612,164 @@ html_blocks = f"""
     background:#007bff; color:white; border:none; border-radius:6px;
     padding:8px 14px; cursor:pointer; font-size:14px;
   }}
+  .toolbar select.toolbar-select {{
+    background:#ffffff; color:#333; border:1px solid #ced4da; border-radius:6px;
+    padding:8px 10px; font-size:14px;
+  }}
+  .toolbar input.toolbar-input {{
+    background:#ffffff; color:#333; border:1px solid #ced4da; border-radius:6px;
+    padding:8px 10px; font-size:14px;
+  }}
   .folder-grid {{
     display:grid;
-    grid-template-columns:repeat(auto-fit, minmax(420px, 1fr));
     gap:16px;
     margin-top:70px;
     padding:10px 20px;
     align-items:start;
   }}
+  .folder-grid.grid-auto {{
+    grid-template-columns:repeat(auto-fit, minmax(calc(var(--card-w) + 80px), 1fr));
+  }}
+  .folder-grid.grid-fixed {{
+    grid-template-columns:repeat(5, minmax(calc(var(--card-w) + 80px), 1fr));
+  }}
+  .folder-grid.grid-2 {{
+    grid-template-columns:repeat(2, minmax(calc(var(--card-w) + 80px), 1fr));
+  }}
+  .folder-grid.grid-3 {{
+    grid-template-columns:repeat(3, minmax(calc(var(--card-w) + 80px), 1fr));
+  }}
+  /* Row-first layout using explicit column wrappers */
+  .folder-grid.rowfirst {{
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 70px;
+    padding: 10px 20px;
+    align-items: stretch;
+  }}
+  .colgroup {{
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 3), minmax(calc(var(--card-w) + 80px), 1fr));
+    gap: 16px;
+    align-items: start;
+  }}
+  .col {{
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }}
+  /* Independent column layout using CSS multi-columns */
+  .folder-grid.columns-2, .folder-grid.columns-3 {{
+    display:block; column-gap:16px; column-fill:auto; margin-top:70px; padding:10px 20px;
+  }}
+  .folder-grid.columns-2 {{ column-count:2; }}
+  .folder-grid.columns-3 {{ column-count:3; }}
+  /* Desktop: cap 5 rows per column */
+  @media (min-width: 769px) {{
+    .folder-grid.columns-2 .folder:nth-child(5n),
+    .folder-grid.columns-3 .folder:nth-child(5n) {{
+      break-after: column;
+    }}
+  }}
+  .folder-grid.columns-2 .folder, .folder-grid.columns-3 .folder {{
+    break-inside: avoid; width: auto;
+  }}
   .folder {{
     background:white; border-radius:10px; padding:0;
     box-shadow:0 2px 10px rgba(0,0,0,0.06);
     display:flex; flex-direction:column; min-height:220px; border:1px solid #e9ecef;
+    width: calc(var(--card-w) + 80px);
   }}
   .folder.collapsed {{ min-height:80px; }}
   .folder-header {{
     display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #f1f3f5; cursor:grab;
   }}
   .caret {{ cursor:pointer; user-select:none; font-size:16px; padding:0 6px; }}
-  .folder.collapsed .list {{ display:none; }}
-  .folder-select {{ width:18px; height:18px; }}
+  /* Smooth expand/collapse using max-height and opacity */
+  .list {{
+    overflow-y:auto; max-height:500px; padding-right:6px;
+    --zoom: 1;
+    transition: max-height 0.25s ease, opacity 0.25s ease;
+  }}
+  .folder.collapsed .list {{
+    max-height: 0; opacity: 0; pointer-events: none;
+  }}
+  .folder-select {{ width:18px; height:18px; display:none; }}
   .folder-title {{
     flex:1; font-weight:bold; font-size:15px; border:none; outline:none;
   }}
   .badge {{ background:#eef2ff; color:#334; font-size:11px; padding:2px 6px; border-radius:10px; }}
   .content {{ margin-top:20px; padding:10px 20px; }}
-  .list {{
-    overflow-y:auto; max-height:620px; padding-right:6px;
-    --zoom: 1;
-  }}
+  /* (moved above with animation) */
   .block {{
-    width:100%; height:calc(80px * var(--zoom)); display:flex; align-items:center; gap:12px;
-    border-radius:8px; padding:6px; margin:8px 0; border:1px solid #ddd;
-    box-shadow:0 1px 2px rgba(0,0,0,0.05); background:white;
+    width:100%; display:flex; flex-direction:column; align-items:center; gap:8px;
+    border-radius:8px; padding:10px; margin:8px 0; border:1px solid #ddd;
+    box-shadow:0 1px 2px rgba(0,0,0,0.05); background:white; cursor:pointer;
   }}
   .block.selected {{ border:2px solid #007bff; background:#eef5ff; }}
-  .thumb {{ width:calc(68px * var(--zoom)); height:calc(68px * var(--zoom)); border-radius:6px; object-fit:cover; }}
-  .handle {{ cursor:grab; font-size:24px; margin-right:8px; width:44px; text-align:center; user-select:none; }}
-  input[type=\"color\"].color-picker {{ width:28px; height:28px; padding:0; border:none; background:transparent; }}
-  input[type=\"text\"].filename {{ flex:1; font-size:14px; padding:4px; }}
-  .sel {{ width:18px; height:18px; }}
+  .thumb {{ width:var(--card-w); max-width:100%; height:auto; border-radius:6px; object-fit:contain; }}
+  .handle {{ display:none; }}
+  input[type=\"color\"].color-picker {{ width:32px; height:32px; padding:0; border:none; background:transparent; }}
+  input[type=\"text\"].filename {{ width:100%; font-size:14px; padding:6px 8px; text-align:center; white-space:nowrap; overflow:hidden; }}
+  .name-row {{ display:flex; gap:8px; align-items:center; width:100%; max-width:var(--card-w); margin:0 auto; }}
+  .name-row .filename {{ flex:1; }}
+  .folder-header.selected {{ outline:2px solid #007bff; background:#eef5ff; }}
+
+  /* Responsive adjustments for mobile/tablet */
+  @media (max-width: 768px) {{
+    :root {{ --card-w: 180px; }}
+    .folder {{ width: calc(var(--card-w) + 60px); }}
+    .folder-header {{ padding: 10px 12px; }}
+    .toolbar {{ flex-wrap: wrap; gap: 8px; }}
+    .list {{ max-height: none; }}
+    /* Reduce columns for responsive layout */
+    .folder-grid.columns-3 {{ column-count: 2; }}
+    /* Tablet: cap 3 rows per column */
+    .folder-grid.columns-2 .folder:nth-child(3n),
+    .folder-grid.columns-3 .folder:nth-child(3n) {{ break-after: column; }}
+  }}
+  @media (max-width: 480px) {{
+    :root {{ --card-w: 160px; }}
+    .folder {{ width: calc(var(--card-w) + 40px); }}
+    .thumb {{ border-radius: 4px; }}
+    .toolbar select.toolbar-select {{ padding: 6px 8px; font-size: 13px; }}
+    .btn, .add-folder-btn, .edit-btn {{ padding: 6px 10px; font-size: 13px; }}
+    /* Mobile: use 2 columns with 2 rows per column */
+    .folder-grid.columns-2, .folder-grid.columns-3 {{ column-count: 2; }}
+    .folder-grid.columns-2 .folder:nth-child(2n),
+    .folder-grid.columns-3 .folder:nth-child(2n) {{ break-after: column; }}
+    /* Slightly smaller content cap for mobile */
+    .list {{ max-height: 380px; }}
+  }}
 </style>
 
 <script src=\"https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js\"></script>
 </head>
 <body>
   <div class=\"toolbar\">
+    <input type=\"text\" id=\"newFolderName\" class=\"toolbar-input\" placeholder=\"New folder name\" style=\"width:180px;\" />
     <button class=\"add-folder-btn\" onclick=\"addFolder()\">+ Add Folder</button>
     <button class=\"edit-btn\" id=\"editBtn\" onclick=\"toggleEdit()\">Edit</button>
     <button class=\"btn\" id=\"deleteBtn\" onclick=\"onDelete()\">Delete</button>
     <button class=\"btn\" id=\"randomBtn\" onclick=\"randomizeIds()\">Random_ID</button>
-    <button class=\"btn\" id=\"exportBtn\" onclick=\"exportZip()\">Export</button>
+    
+    <button class=\"btn\" id=\"exportBtn\" onclick=\"exportZip(false)\">Export (Folders)</button>
+    <button class=\"btn\" id=\"exportFlatBtn\" onclick=\"exportZip(true)\">Export (Flatten)</button>
+    <span style=\"margin-left:auto; display:flex; align-items:center; gap:8px;\">
+      <label style=\"font-size:13px;\" for=\"sortSelect\">Sort</label>
+      <select id=\"sortSelect\" class=\"toolbar-select\">
+        <option value=\"none\">None</option>
+        <option value=\"name\">Name (A→Z)</option>
+      </select>
+      <label style=\"font-size:13px;\" for=\"layoutSelect\">Layout</label>
+      <select id=\"layoutSelect\" class=\"toolbar-select\">
+        <option value=\"auto\">Auto</option>
+        <option value=\"cols2\">2 columns</option>
+        <option value=\"cols3\">3 columns</option>
+      </select>
+    </span>
   </div>
 
   <div class=\"folder-grid\" id=\"folderGrid\"></div>
@@ -629,11 +800,328 @@ const mainList = document.getElementById('mainList');
 const folderGrid = document.getElementById('folderGrid');
 const modalBackdrop = document.getElementById('modalBackdrop');
 const editBtn = document.getElementById('editBtn');
+const sortSelect = document.getElementById('sortSelect');
+const layoutSelect = document.getElementById('layoutSelect');
 let folderCount = 0;
 const folderKeyToInfo = new Map();
 const selectedIds = new Set();
 const selectedFolders = new Set();
 let lastSelectedId = null;
+
+// Initialize layout mode
+if (layoutSelect) {{
+  layoutSelect.addEventListener('change', () => applyLayout(layoutSelect.value));
+  // Default to 3-column responsive layout
+  layoutSelect.value = 'cols3';
+  applyLayout('cols3');
+}} else {{
+  // Fallback to 3 columns when selector is missing
+  applyLayout('cols3');
+}}
+if (sortSelect) {{
+  sortSelect.addEventListener('change', () => applySort(sortSelect.value));
+}}
+
+function applyLayout(mode) {{
+  if (!folderGrid) return;
+  const isAuto = mode === 'auto' || !mode;
+  // Reset classes
+  folderGrid.classList.remove('columns-2', 'columns-3', 'grid-fixed', 'grid-2', 'grid-3', 'rowfirst');
+  folderGrid.classList.toggle('grid-auto', isAuto);
+  if (isAuto) {{
+    // Flatten back to a simple auto grid
+    flattenToGrid();
+    setupFolderSortables();
+    return;
+  }}
+  const cols = getColsFromMode(mode);
+  folderGrid.classList.add('rowfirst');
+  const rowsPerCol = getRowsPerCol();
+  redistributeRowFirst(cols, rowsPerCol);
+}}
+
+function getColsFromMode(mode) {{
+  if (mode === 'cols2') return 2;
+  if (mode === 'cols3') return 3;
+  return 3; // default
+}}
+
+function getRowsPerCol() {{
+  // Desktop: 5, Tablet (<=768px): 3, Mobile (<=480px): 2
+  if (window.matchMedia('(max-width: 480px)').matches) return 2;
+  if (window.matchMedia('(max-width: 768px)').matches) return 3;
+  return 5;
+}}
+
+function flattenToGrid() {{
+  const folders = Array.from(document.querySelectorAll('#folderGrid .folder'));
+  folderGrid.innerHTML = '';
+  folders.forEach(f => folderGrid.appendChild(f));
+}}
+
+function ensureColgroup(cols) {{
+  const group = document.createElement('div');
+  group.className = 'colgroup';
+  group.style.setProperty('--cols', cols);
+  for (let c = 0; c < cols; c++) {{
+    const col = document.createElement('div');
+    col.className = 'col';
+    group.appendChild(col);
+  }}
+  return group;
+}}
+
+function redistributeRowFirst(cols, rowsPerCol) {{
+  const folders = Array.from(document.querySelectorAll('#folderGrid .folder'));
+  folderGrid.innerHTML = '';
+  let currentGroupIndex = -1;
+  let group = null;
+  let columns = [];
+  for (let i = 0; i < folders.length; i++) {{
+    const gi = Math.floor(i / (cols * rowsPerCol));
+    const ci = i % cols;
+    if (gi !== currentGroupIndex) {{
+      group = ensureColgroup(cols);
+      columns = Array.from(group.querySelectorAll('.col'));
+      folderGrid.appendChild(group);
+      currentGroupIndex = gi;
+    }}
+    columns[ci].appendChild(folders[i]);
+  }}
+  setupFolderSortables();
+}}
+
+function appendFolderRowFirst(folder) {{
+  const mode = layoutSelect ? layoutSelect.value : 'cols3';
+  const cols = getColsFromMode(mode);
+  const rowsPerCol = getRowsPerCol();
+  const count = document.querySelectorAll('#folderGrid .folder').length;
+  const gi = Math.floor(count / (cols * rowsPerCol));
+  const ci = count % cols;
+  const groups = Array.from(folderGrid.querySelectorAll('.colgroup'));
+  let group = groups[gi];
+  if (!group) {{
+    group = ensureColgroup(cols);
+    folderGrid.appendChild(group);
+  }}
+  const columns = Array.from(group.querySelectorAll('.col'));
+  columns[ci].appendChild(folder);
+  setupFolderSortables();
+}}
+
+function setupFolderSortables() {{
+  // Enable sortable folders within and across columns
+  Array.from(folderGrid.querySelectorAll('.col')).forEach(col => {{
+    if (col._sortable) return;
+    col._sortable = new Sortable(col, {{
+      draggable: '.folder',
+      handle: '.folder',
+      animation: 0,
+      group: 'folders',
+      swap: true,
+      swapClass: 'swap-target',
+      swapThreshold: 0.5,
+      onMove: (evt) => {{
+        const related = evt.related;
+        const dragged = evt.dragged;
+        // Only allow when hovering another folder element (strict swap-only)
+        return !!(related && related !== dragged);
+      }},
+      onStart: (evt) => {{
+        const item = evt.item;
+        // Record original position for swap restoration
+        item._origParent = item.parentElement;
+        item._origNext = item.nextSibling;
+      }},
+      onEnd: (evt) => {{
+        const dragged = evt.item;
+        const origParent = dragged._origParent;
+        const origNext = dragged._origNext;
+        // Determine pointer position for accurate drop target detection
+        let target = (evt.originalEvent && evt.originalEvent.target) ? evt.originalEvent.target : null;
+        if (!target && evt.originalEvent) {{
+          const oe = evt.originalEvent;
+          let x = 0, y = 0;
+          if (oe.touches && oe.touches.length) {{
+            x = oe.touches[0].clientX; y = oe.touches[0].clientY;
+          }} else if (oe.changedTouches && oe.changedTouches.length) {{
+            x = oe.changedTouches[0].clientX; y = oe.changedTouches[0].clientY;
+          }} else if (oe.clientX != null && oe.clientY != null) {{
+            x = oe.clientX; y = oe.clientY;
+          }}
+          if (x || y) {{ target = document.elementFromPoint(x, y); }}
+        }}
+        let dropFolder = target ? target.closest('.folder') : null;
+        // If pointer is over the dragged folder itself, treat as no target
+        if (dropFolder === dragged) {{ dropFolder = null; }}
+        // If not directly over a folder, try overlap-based detection
+        if (!dropFolder && evt.to) {{
+          const siblings = Array.from(evt.to.querySelectorAll('.folder')).filter(el => el !== dragged);
+          const dRect = dragged.getBoundingClientRect();
+          let best = null, bestArea = 0;
+          siblings.forEach(el => {{
+            const r = el.getBoundingClientRect();
+            const ix = Math.max(0, Math.min(dRect.right, r.right) - Math.max(dRect.left, r.left));
+            const iy = Math.max(0, Math.min(dRect.bottom, r.bottom) - Math.max(dRect.top, r.top));
+            const area = ix * iy;
+            if (area > bestArea) {{ bestArea = area; best = el; }}
+          }});
+          if (best) {{ dropFolder = best; }}
+        }}
+
+        // Strict swap-only: require drop directly on another folder
+
+        // If still not on a folder, restore to original position (no reorder)
+        if (!dropFolder && origParent) {{
+          if (origNext) {{
+            origParent.insertBefore(dragged, origNext);
+          }} else {{
+            origParent.appendChild(dragged);
+          }}
+          return;
+        }}
+
+        if (dropFolder && dropFolder !== dragged && origParent) {{
+          // Capture dropFolder's current position
+          const dropParent = dropFolder.parentElement;
+          const dropNext = dropFolder.nextSibling;
+
+          // Swap positions: place dropFolder where dragged was, and dragged where dropFolder was
+          if (origNext) {{
+            origParent.insertBefore(dropFolder, origNext);
+          }} else {{
+            origParent.appendChild(dropFolder);
+          }}
+          if (dropNext) {{
+            dropParent.insertBefore(dragged, dropNext);
+          }} else {{
+            dropParent.appendChild(dragged);
+          }}
+        }}
+
+        // Cleanup and sync order after any move/swap
+        dragged._origParent = null;
+        dragged._origNext = null;
+        sendOrder();
+      }}
+    }});
+  }});
+
+  // Fallback for layouts where folders are direct children (grid/columns layout)
+  const hasCols = folderGrid.querySelectorAll('.col').length > 0;
+  if (!hasCols) {{
+    if (!folderGrid._sortable) {{
+      folderGrid._sortable = new Sortable(folderGrid, {{
+        draggable: '.folder',
+        handle: '.folder',
+        animation: 0,
+        group: 'folders',
+        swap: true,
+        swapClass: 'swap-target',
+        swapThreshold: 0.5,
+        onMove: (evt) => {{
+          const related = evt.related;
+          const dragged = evt.dragged;
+          // Only allow when hovering another folder element (strict swap-only)
+          return !!(related && related !== dragged);
+        }},
+        onStart: (evt) => {{
+          const item = evt.item;
+          item._origParent = item.parentElement;
+          item._origNext = item.nextSibling;
+        }},
+        onEnd: (evt) => {{
+          const dragged = evt.item;
+          const origParent = dragged._origParent;
+          const origNext = dragged._origNext;
+          // Determine pointer position for accurate drop target detection
+          let target = (evt.originalEvent && evt.originalEvent.target) ? evt.originalEvent.target : null;
+          if (!target && evt.originalEvent) {{
+            const oe = evt.originalEvent;
+            let x = 0, y = 0;
+            if (oe.touches && oe.touches.length) {{
+              x = oe.touches[0].clientX; y = oe.touches[0].clientY;
+            }} else if (oe.changedTouches && oe.changedTouches.length) {{
+              x = oe.changedTouches[0].clientX; y = oe.changedTouches[0].clientY;
+            }} else if (oe.clientX != null && oe.clientY != null) {{
+              x = oe.clientX; y = oe.clientY;
+            }}
+            if (x || y) {{ target = document.elementFromPoint(x, y); }}
+          }}
+          let dropFolder = target ? target.closest('.folder') : null;
+          // If pointer is over the dragged folder itself, treat as no target
+          if (dropFolder === dragged) {{ dropFolder = null; }}
+          // If not directly over a folder, try overlap-based detection
+          if (!dropFolder && evt.to) {{
+            const siblings = Array.from(evt.to.querySelectorAll('.folder')).filter(el => el !== dragged);
+            const dRect = dragged.getBoundingClientRect();
+            let best = null, bestArea = 0;
+            siblings.forEach(el => {{
+              const r = el.getBoundingClientRect();
+              const ix = Math.max(0, Math.min(dRect.right, r.right) - Math.max(dRect.left, r.left));
+              const iy = Math.max(0, Math.min(dRect.bottom, r.bottom) - Math.max(dRect.top, r.top));
+              const area = ix * iy;
+              if (area > bestArea) {{ bestArea = area; best = el; }}
+            }});
+            if (best) {{ dropFolder = best; }}
+          }}
+          
+          // Strict swap-only: require drop directly on another folder
+          
+          // If still not on a folder, restore to original position (no reorder)
+          if (!dropFolder && origParent) {{
+            if (origNext) {{
+              origParent.insertBefore(dragged, origNext);
+            }} else {{
+              origParent.appendChild(dragged);
+            }}
+            return;
+          }}
+          
+          if (dropFolder && dropFolder !== dragged && origParent) {{
+            const dropParent = dropFolder.parentElement;
+            const dropNext = dropFolder.nextSibling;
+            if (origNext) {{
+              origParent.insertBefore(dropFolder, origNext);
+            }} else {{
+              origParent.appendChild(dropFolder);
+            }}
+            if (dropNext) {{
+              dropParent.insertBefore(dragged, dropNext);
+            }} else {{
+              dropParent.appendChild(dragged);
+            }}
+          }}
+          dragged._origParent = null;
+          dragged._origNext = null;
+          sendOrder();
+        }}
+      }});
+    }}
+  }}
+}}
+
+function sortBlocksByName(list, asc=true) {{
+  const blocks = Array.from(list.querySelectorAll('.block'));
+  blocks.sort((a, b) => {{
+    const fa = (a.querySelector('.filename')?.value || '').toLowerCase();
+    const fb = (b.querySelector('.filename')?.value || '').toLowerCase();
+    return asc ? fa.localeCompare(fb) : fb.localeCompare(fa);
+  }});
+  blocks.forEach(b => list.appendChild(b));
+  const folder = list.closest('.folder');
+  const tName = folder ? (folder.querySelector('.folder-title')?.value || '').trim() : '';
+  renumber(list, tName, false);
+  if (folder) updateBadge(folder);
+}}
+
+function applySort(mode) {{
+  if (mode !== 'name') return; // 'none' leaves current order as-is
+  const lists = Array.from(document.querySelectorAll('.list'));
+  if (mainList) lists.push(mainList);
+  lists.forEach(list => sortBlocksByName(list, true));
+  sendOrder();
+}}
 
 function typeKey(name) {{
   return (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -648,16 +1136,62 @@ function ensureFolder(name) {{
   return info;
 }}
 
-function clearSelection() {{
-  const blocks = document.querySelectorAll('.block.selected');
-  blocks.forEach(b => {{
-    b.classList.remove('selected');
-    const cb = b.querySelector('input.sel');
-    if (cb) cb.checked = false;
+  function clearSelection() {{
+    const blocks = document.querySelectorAll('.block.selected');
+    blocks.forEach(b => {{
+      b.classList.remove('selected');
+      const cb = b.querySelector('input.sel');
+      if (cb) cb.checked = false;
+    }});
+    selectedIds.clear();
+    lastSelectedId = null;
+  }}
+
+  function clearAllSelections() {{
+    // Clear image selections
+    clearSelection();
+    // Clear folder selections
+    document.querySelectorAll('.folder-header.selected').forEach(h => h.classList.remove('selected'));
+    document.querySelectorAll('.folder-select').forEach(cb => {{ cb.checked = false; }});
+    selectedFolders.clear();
+  }}
+
+  // Auto-fit long filename text to the available input width
+  function fitFilename(input) {{
+    if (!input) return;
+    const rect = input.getBoundingClientRect();
+    const available = Math.max(0, rect.width - 16);
+    const style = getComputedStyle(input);
+    const baseSize = parseFloat(style.fontSize) || 14;
+    const family = style.fontFamily || 'sans-serif';
+    const canvas = fitFilename._canvas || (fitFilename._canvas = document.createElement('canvas'));
+    const ctx = canvas.getContext('2d');
+    const text = input.value || '';
+    // measure at base size then scale
+    ctx.font = `${{baseSize}}px ${{family}}`;
+    const measured = ctx.measureText(text).width;
+    let size = baseSize;
+    if (measured > 0 && available > 0) {{
+      const scale = Math.min(1, available / measured);
+      size = Math.max(9, Math.floor(baseSize * scale));
+    }}
+    input.style.fontSize = size + 'px';
+  }}
+
+  function fitAllFilenames() {{
+    document.querySelectorAll('input.filename').forEach(inp => fitFilename(inp));
+  }}
+  window.addEventListener('resize', fitAllFilenames);
+
+  // Clicking outside folders and toolbar deselects images and folders
+  document.addEventListener('click', (e) => {{
+    const insideFolder = e.target.closest('.folder');
+    const insideModal = e.target.closest('#modalBackdrop');
+    const insideToolbar = e.target.closest('.toolbar');
+    if (!insideFolder && !insideModal && !insideToolbar) {{
+      clearAllSelections();
+    }}
   }});
-  selectedIds.clear();
-  lastSelectedId = null;
-}}
 
 // Color utils: RGB->Lab and CIEDE2000
 function rgb2xyz([r,g,b]) {{
@@ -730,6 +1264,42 @@ function getColorHexFromName(colorName) {{
   return null;
 }}
 
+// Helper: RGB array to hex string
+function rgbToHex([r,g,b]) {{
+  const toHex = (x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0');
+  return '#' + toHex(r) + toHex(g) + toHex(b);
+}}
+
+// Scan a central region of the image to estimate the dominant cloth color
+function scanDominantColorFromImage(imgEl) {{
+  try {{
+    const w = imgEl.naturalWidth || imgEl.width;
+    const h = imgEl.naturalHeight || imgEl.height;
+    if (!w || !h) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgEl, 0, 0, w, h);
+    // Sample a centered rectangle (50% of width/height)
+    const rw = Math.max(1, Math.floor(w * 0.5));
+    const rh = Math.max(1, Math.floor(h * 0.5));
+    const sx = Math.max(0, Math.floor((w - rw) / 2));
+    const sy = Math.max(0, Math.floor((h - rh) / 2));
+    const data = ctx.getImageData(sx, sy, rw, rh).data;
+    let r = 0, g = 0, b = 0, count = 0;
+    for (let i = 0; i < data.length; i += 4) {{
+      r += data[i]; g += data[i+1]; b += data[i+2]; count++;
+    }}
+    if (count === 0) return null;
+    r = Math.round(r / count); g = Math.round(g / count); b = Math.round(b / count);
+    const hex = rgbToHex([r,g,b]);
+    const name = nearestPaletteNameFromHex(hex);
+    return {{ rgb: [r,g,b], hex, name }};
+  }} catch (e) {{
+    return null;
+  }}
+}}
+
 document.addEventListener('contextmenu', (e) => {{ e.preventDefault(); clearSelection(); }});
 
 function toggleEdit() {{
@@ -750,42 +1320,66 @@ function createBlock(item) {{
   wrapper.dataset.uniqueId = item.unique_id;
   wrapper.dataset.clothType = item.cloth_type;
   wrapper.dataset.colorName = item.color_norm;
+  wrapper.dataset.ext = item.ext;
   wrapper.setAttribute('draggable','true');
 
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  checkbox.className = 'sel';
-  checkbox.addEventListener('change', () => {{
-    if (checkbox.checked) {{ selectedIds.add(item.id.toString()); wrapper.classList.add('selected'); lastSelectedId = item.id.toString(); }}
-    else {{ selectedIds.delete(item.id.toString()); wrapper.classList.remove('selected'); }}
+  // Click: toggle select/deselect on single click (double-click still toggles).
+  wrapper.addEventListener('click', (e) => {{
+    const idStr = item.id.toString();
+    // Delay to distinguish single vs double click
+    if (wrapper._clickTimer) {{ clearTimeout(wrapper._clickTimer); }}
+    wrapper._clickTimer = setTimeout(() => {{
+      if (wrapper.classList.contains('selected')) {{
+        wrapper.classList.remove('selected');
+        selectedIds.delete(idStr);
+        if (lastSelectedId === idStr) {{ lastSelectedId = null; }}
+      }} else {{
+        wrapper.classList.add('selected');
+        selectedIds.add(idStr);
+        lastSelectedId = idStr;
+      }}
+      sendOrder();
+      wrapper._clickTimer = null;
+    }}, 200);
   }});
-  // Right-click selection
+
+  wrapper.addEventListener('dblclick', (e) => {{
+    const idStr = item.id.toString();
+    if (wrapper._clickTimer) {{ clearTimeout(wrapper._clickTimer); wrapper._clickTimer = null; }}
+    if (wrapper.classList.contains('selected')) {{
+      wrapper.classList.remove('selected');
+      selectedIds.delete(idStr);
+      if (lastSelectedId === idStr) {{ lastSelectedId = null; }}
+    }} else {{
+      wrapper.classList.add('selected');
+      selectedIds.add(idStr);
+      lastSelectedId = idStr;
+    }}
+    sendOrder();
+  }});
+
+  // Right-click selects only this image
   wrapper.addEventListener('contextmenu', (e) => {{
     e.preventDefault();
-    if (!wrapper.classList.contains('selected')) {{
-      selectedIds.clear();
-      wrapper.classList.add('selected');
-      selectedIds.add(item.id.toString());
-      lastSelectedId = item.id.toString();
-      checkbox.checked = true;
-    }}
+    const idStr = item.id.toString();
+    clearSelection();
+    wrapper.classList.add('selected');
+    selectedIds.add(idStr);
+    lastSelectedId = idStr;
   }});
-  
+
   // Improved drag functionality
   wrapper.addEventListener('dragstart', (e) => {{
+    const idStr = item.id.toString();
     if (!wrapper.classList.contains('selected')) {{
-      selectedIds.clear();
+      clearSelection();
       wrapper.classList.add('selected');
-      selectedIds.add(item.id.toString());
-      lastSelectedId = item.id.toString();
-      checkbox.checked = true;
+      selectedIds.add(idStr);
+      lastSelectedId = idStr;
     }}
     e.dataTransfer.effectAllowed = 'move';
-    // Store selected IDs for drag operation
     e.dataTransfer.setData('text/selectedIds', JSON.stringify(Array.from(selectedIds)));
   }});
-  
-  wrapper.appendChild(checkbox);
 
   const handle = document.createElement('div');
   handle.className = 'handle';
@@ -806,25 +1400,30 @@ function createBlock(item) {{
     const name = nearestPaletteNameFromHex(picker.value);
     const norm = name.replace(/\s+/g,'_').toLowerCase();
     wrapper.dataset.colorName = norm;
-    const list = wrapper.parentElement;
-    const folder = list.closest('.folder');
-    const ct = folder ? folder.querySelector('.folder-title').value.trim() : wrapper.dataset.clothType;
-    renumber(list, ct, false);
-    sendOrder();
+  const list = wrapper.parentElement;
+  const folder = list.closest('.folder');
+  const ct = folder ? (folder.querySelector('.folder-title')?.value || '').trim() : wrapper.dataset.clothType;
+  renumber(list, ct, false);
+  sendOrder();
   }});
-  wrapper.appendChild(picker);
+  // Place color picker and filename on one line
 
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'filename';
   input.value = item.filename;
-  input.addEventListener('input', sendOrder);
-  wrapper.appendChild(input);
+  fitFilename(input);
+  input.addEventListener('input', () => {{ fitFilename(input); sendOrder(); }});
+  const nameRow = document.createElement('div');
+  nameRow.className = 'name-row';
+  nameRow.appendChild(picker);
+  nameRow.appendChild(input);
+  wrapper.appendChild(nameRow);
 
   return wrapper;
 }}
 
-// Allow dropping onto folder headers to move images
+// Allow dropping onto folder headers only for folder swap (no image drop)
 function setupHeaderDrop(header, folder, list) {{
   header.setAttribute('draggable','true');
   header.addEventListener('dragstart', (e) => {{
@@ -836,33 +1435,63 @@ function setupHeaderDrop(header, folder, list) {{
     e.preventDefault(); header.style.background = '';
     const srcId = e.dataTransfer.getData('text/folderId');
     if (srcId) {{
-      const srcFolder = Array.from(folderGrid.children).find(f => String(f.dataset.folderId) === String(srcId));
-      if (srcFolder && srcFolder !== folder) {{ swapNodes(srcFolder, folder); return; }}
+      const srcFolder = Array.from(document.querySelectorAll('#folderGrid .folder')).find(f => String(f.dataset.folderId) === String(srcId));
+      if (srcFolder && srcFolder !== folder) {{
+        swapNodes(srcFolder, folder);
+        sendOrder();
+      }}
     }}
-    const ids = Array.from(selectedIds);
-    for (const id of ids) {{
-      const el = document.querySelector(`.block[data-id=\\"${{id}}\\"]`);
-      if (el && el.parentElement !== list) list.appendChild(el);
-    }}
-    const tName = folder.querySelector('.folder-title').value.trim();
-    renumber(list, tName, false);
-    updateBadge(folder);
-    sendOrder();
+    // Intentionally do nothing for image drops; folder cards are swap-only
   }});
+}}
+
+// Disable folder card drop area for images; swap is handled by Sortable onEnd
+// (No-op function retained for safety if referenced elsewhere)
+function setupFolderDropArea(folder, list) {{
+  // Intentionally no behavior: users cannot drop images onto folder cards
 }}
 
 function createFolder(name = "New Folder") {{
   const folder = document.createElement('div');
   folder.className = 'folder';
   folder.dataset.folderId = String(folderCount++);
+  // Store non-editable type info on the dataset
+  folder.dataset.typeName = name;
+  folder.dataset.typeKey = typeKey(name);
 
   const header = document.createElement('div');
   header.className = 'folder-header';
+  // Double-click selects all images inside the folder
+  header.addEventListener('dblclick', () => {{
+    const fid = String(folder.dataset.folderId);
+    const list = folder.querySelector('.list');
+    if (header.classList.contains('selected')) {{
+      // If folder is selected, double-click deselects the folder and clears highlights
+      header.classList.remove('selected');
+      selectedFolders.delete(fid);
+      document.querySelectorAll('.block.selected').forEach(b => b.classList.remove('selected'));
+      selectedIds.clear();
+      lastSelectedId = null;
+    }} else {{
+      // If folder is not selected, double-click selects all images inside
+      header.classList.add('selected');
+      selectedFolders.add(fid);
+      document.querySelectorAll('.block.selected').forEach(b => b.classList.remove('selected'));
+      selectedIds.clear();
+      Array.from(list.querySelectorAll('.block')).forEach(b => {{
+        b.classList.add('selected');
+        selectedIds.add(b.dataset.id);
+      }});
+      lastSelectedId = null;
+    }}
+  }});
 
   const caret = document.createElement('span');
   caret.className = 'caret';
   caret.textContent = '▾';
-  caret.addEventListener('click', () => {{
+  // Toggle collapse via caret click without affecting other columns
+  caret.addEventListener('click', (e) => {{
+    e.stopPropagation();
     folder.classList.toggle('collapsed');
     caret.textContent = folder.classList.contains('collapsed') ? '▸' : '▾';
   }});
@@ -875,22 +1504,36 @@ function createFolder(name = "New Folder") {{
     if (folderSel.checked) {{ selectedFolders.add(fid); }} else {{ selectedFolders.delete(fid); }}
   }});
 
-  const title = document.createElement('input');
-  title.className = 'folder-title';
-  title.value = name;
-  title.addEventListener('input', () => {{
+  // Restore editable folder title input
+  const titleInput = document.createElement('input');
+  titleInput.type = 'text';
+  titleInput.className = 'folder-title';
+  titleInput.value = name;
+  titleInput.addEventListener('input', () => {{
+    const newName = (titleInput.value || '').trim() || 'New Folder';
+    folder.dataset.typeName = newName;
+    folder.dataset.typeKey = typeKey(newName);
     const list = folder.querySelector('.list');
-    const newType = title.value.trim();
-    const oldKey = folder.dataset.typeKey || '';
-    const newKey = typeKey(newType);
-    if (oldKey && oldKey !== newKey) {{ folderKeyToInfo.delete(oldKey); }}
-    folder.dataset.typeKey = newKey;
-    folderKeyToInfo.set(newKey, {{ folder, list, title }});
-    const blocks = Array.from(list.querySelectorAll('.block'));
-    for (const b of blocks) {{ b.dataset.clothType = newType; }}
-    renumber(list, newType, false);
-    updateBadge(folder);
+    if (list) {{
+      const blocks = Array.from(list.querySelectorAll('.block'));
+      blocks.forEach(b => {{
+        b.dataset.clothType = newName;
+        ensureUidPrefixKeepDigits(b, newName, list);
+        updateFilenameKeepNumbering(b);
+      }});
+      renumber(list, newName, false);
+    }}
+    // Align images to folders by Unique_ID prefix after title changes
+    syncByPrefix();
     sendOrder();
+  }});
+
+  // Single-click on header toggles collapse (independent accordion per folder)
+  header.addEventListener('click', (e) => {{
+    // Ignore clicks on controls
+    if (e.target === folderSel || e.target === caret || e.target === titleInput) return;
+    folder.classList.toggle('collapsed');
+    caret.textContent = folder.classList.contains('collapsed') ? '▸' : '▾';
   }});
 
   const badge = document.createElement('span');
@@ -899,7 +1542,7 @@ function createFolder(name = "New Folder") {{
 
   header.appendChild(caret);
   header.appendChild(folderSel);
-  header.appendChild(title);
+  header.appendChild(titleInput);
   header.appendChild(badge);
   folder.appendChild(header);
 
@@ -909,13 +1552,15 @@ function createFolder(name = "New Folder") {{
   list.addEventListener('wheel', (e) => {{ if (!e.ctrlKey) return; e.preventDefault(); const current = parseFloat(getComputedStyle(list).getPropertyValue('--zoom')) || 1; const delta = e.deltaY < 0 ? 0.1 : -0.1; let next = current + delta; if (next < 1) next = 1; list.style.setProperty('--zoom', next.toFixed(2)); }}, {{ passive: false }});
 
   folder.appendChild(list);
-  folderGrid.appendChild(folder);
+  // Append with row-first distribution
+  appendFolderRowFirst(folder);
 
-  Sortable.create(list, {{ group: 'shared', animation: 200, handle: '.handle, .thumb', onEnd: onDragEnd }});
+  Sortable.create(list, {{ group: 'shared', animation: 0, handle: '.handle, .thumb', onEnd: onDragEnd }});
   setupHeaderDrop(header, folder, list);
+  // Swap-only: no image drop area on folder card
 
   updateBadge(folder);
-  return {{ folder, list, title }};
+  return {{ folder, list }};
 }}
 
 function updateBadge(folder) {{
@@ -925,13 +1570,32 @@ function updateBadge(folder) {{
 }}
 
 function addFolder() {{
-  const {{ list, title }} = createFolder();
-  folderKeyToInfo.set(typeKey(title.value), {{ folder: list.closest('.folder'), list, title }});
+  const nameBox = document.getElementById('newFolderName');
+  const desired = nameBox ? (nameBox.value || '').trim() : '';
+  const {{ folder, list }} = createFolder(desired || 'New Folder');
+  const key = folder.dataset.typeKey || typeKey(folder.dataset.typeName || '');
+  folderKeyToInfo.set(key, {{ folder, list }});
+  if (nameBox) nameBox.value = '';
   sendOrder();
 }}
 
 function renumber(list, clothType, forceNewUid=false) {{
   const blocks = Array.from(list.querySelectorAll('.block'));
+  // Ensure each block's Unique_ID first letter matches the folder type's first letter
+  const expectedPrefix = firstLetterFromType(clothType);
+  if (expectedPrefix) {{
+    for (const b of blocks) {{
+      const uid = b.dataset.uniqueId || '';
+      const curPrefix = uid.charAt(0).toUpperCase();
+      if (curPrefix !== expectedPrefix) {{
+        let digits = getUidDigits(uid);
+        if (!digits || digits.length !== 6) {{
+          digits = Array.from({{length:6}}, () => Math.floor(Math.random()*10)).join('');
+        }}
+        b.dataset.uniqueId = expectedPrefix + digits;
+      }}
+    }}
+  }}
   const groups = new Map();
   for (const b of blocks) {{
     const ct = clothType || b.dataset.clothType || '';
@@ -957,23 +1621,105 @@ function renumber(list, clothType, forceNewUid=false) {{
       const colorUnderscore = (color || '').replace(/\s+/g, '_');
       // Only add numbering if there are true duplicates (same Unique_ID + Cloth_style + Color_name)
       const numbering = N === 1 ? '1 of 1' : `${{i+1}} of ${{N}}`;
-      input.value = `${{b.dataset.uniqueId}}_${{ctUnderscore}}_${{colorUnderscore}} ${{numbering}}.jpg`;
+      const ext = b.dataset.ext || '.jpg';
+      input.value = `${{b.dataset.uniqueId}}_${{ctUnderscore}}_${{colorUnderscore}} ${{numbering}}${{ext}}`;
+      fitFilename(input);
     }});
   }}
 }}
 
+function isUniqueId(uid) {{
+  return Array.from(document.querySelectorAll('.block')).every(b => b.dataset.uniqueId !== uid);
+}}
+
 function generateUniqueId(ct) {{
   const firstChar = (ct || '').replace(/[^A-Za-z]/g, '').charAt(0).toUpperCase() || 'X';
-  let digits = '';
-  for (let i = 0; i < 6; i++) digits += Math.floor(Math.random() * 10).toString();
-  return firstChar + digits;
+  let uid = '';
+  do {{
+    let digits = '';
+    for (let i = 0; i < 6; i++) digits += Math.floor(Math.random() * 10).toString();
+    uid = firstChar + digits;
+  }} while (!isUniqueId(uid));
+  return uid;
+}}
+
+// Helpers to update Unique_ID when moving items: change prefix only, keep digits unless collision within folder
+function firstLetterFromType(ct) {{
+  return (ct || '').replace(/[^A-Za-z]/g, '').charAt(0).toUpperCase() || 'X';
+}}
+function getUidDigits(uid) {{
+  const s = String(uid || '');
+  const m = s.match(/(\d{6})$/);
+  if (m) return m[1];
+  // Fallback: remove leading letter and return remainder
+  return s.replace(/^[A-Za-z]/,'');
+}}
+function ensureUidPrefixKeepDigits(block, newType, list) {{
+  const prefix = firstLetterFromType(newType);
+  let digits = getUidDigits(block.dataset.uniqueId);
+  if (!digits || digits.length !== 6) {{
+    // Normalize to 6 digits if absent
+    digits = Array.from({{length:6}}, () => Math.floor(Math.random()*10)).join('');
+  }}
+  block.dataset.uniqueId = prefix + digits;
+}}
+
+// Update filename to reflect new Unique_ID prefix while preserving existing numbering (e.g., "2 of 2")
+function updateFilenameKeepNumbering(block) {{
+  const input = block.querySelector('.filename');
+  if (!input) return;
+  const ext = block.dataset.ext || '.jpg';
+  const ctUnderscore = (block.dataset.clothType || '').replace(/\s+/g, '_');
+  const colorUnderscore = (block.dataset.colorName || '').replace(/\s+/g, '_');
+  const m = String(input.value).match(/\s(\d+\s+of\s+\d+)\.[A-Za-z0-9]+$/);
+  const numbering = m ? m[1] : '1 of 1';
+  input.value = `${{block.dataset.uniqueId}}_${{ctUnderscore}}_${{colorUnderscore}} ${{numbering}}${{ext}}`;
+  fitFilename(input);
+}}
+
+// Auto-sync images into folders by Unique_ID first letter matching folder title first letter
+function syncByPrefix() {{
+  const folders = Array.from(document.querySelectorAll('#folderGrid .folder'));
+  const folderByPrefix = new Map();
+  folders.forEach(f => {{
+    const name = (f.querySelector('.folder-title')?.value || '').trim();
+    const pfx = firstLetterFromType(name);
+    if (pfx) folderByPrefix.set(pfx, f);
+  }});
+
+  const allBlocks = Array.from(document.querySelectorAll('.block'));
+  const affectedLists = new Set();
+  allBlocks.forEach(b => {{
+    const uid = b.dataset.uniqueId || '';
+    const pfx = uid.charAt(0).toUpperCase();
+    const folder = folderByPrefix.get(pfx);
+    if (!folder) return;
+    const list = folder.querySelector('.list');
+    if (b.parentElement !== list) {{
+      if (b.parentElement) affectedLists.add(b.parentElement);
+      affectedLists.add(list);
+      b.parentElement?.removeChild(b);
+      list.appendChild(b);
+      const tName = (folder.querySelector('.folder-title')?.value || '').trim();
+      b.dataset.clothType = tName;
+      ensureUidPrefixKeepDigits(b, tName, list);
+      updateFilenameKeepNumbering(b);
+    }}
+  }});
+
+  affectedLists.forEach(list => {{
+    const f = list.closest('.folder');
+    const tName = f ? (f.querySelector('.folder-title')?.value || '').trim() : '';
+    renumber(list, tName, false);
+    if (f) updateBadge(f);
+  }});
 }}
 
 // Build folders by cloth_type
 const types = Array.from(new Set(data.map(d => d.cloth_type)));
 for (const t of types) {{
-  const info = ensureFolder(t);
-  info.title.value = t;
+  // ensureFolder will create folder with dataset.typeName/typeKey
+  ensureFolder(t);
 }}
 
 // Place blocks into their cloth_type folders (create if missing)
@@ -985,7 +1731,7 @@ for (const it of data) {{
 }}
 // Initial renumber per folder
 for (const folder of folderGrid.children) {{
-  const title = folder.querySelector('.folder-title').value.trim();
+  const title = (folder.dataset.typeName || '').trim();
   const list = folder.querySelector('.list');
   renumber(list, title);
 }}
@@ -998,18 +1744,23 @@ Sortable.create(mainList, {{
 }});
 
 // Make folders sortable by header drag and support swap-on-drop
-new Sortable(document.getElementById('folderGrid'), {{
-  draggable: '.folder',
-  handle: '.folder-header',
-  animation: 200
-}});
+setupFolderSortables();
 
 function swapNodes(a, b) {{
+  const aParent = a.parentNode;
+  const bParent = b.parentNode;
   const aNext = a.nextSibling;
-  const parent = a.parentNode;
-  if (b === aNext) {{ parent.insertBefore(b, a); return; }}
-  parent.insertBefore(a, b);
-  parent.insertBefore(b, aNext);
+  const bNext = b.nextSibling;
+  if (aParent === bParent) {{
+    if (b === aNext) {{ aParent.insertBefore(b, a); return; }}
+    aParent.insertBefore(a, b);
+    aParent.insertBefore(b, aNext);
+  }} else {{
+    // Move b into a's parent where a was
+    aParent.insertBefore(b, aNext);
+    // Move a into b's parent where b was
+    bParent.insertBefore(a, bNext);
+  }}
 }}
 
 function openBatchModal() {{
@@ -1059,6 +1810,8 @@ function applyBatch() {{
   for (const id of ids) {{ const b = document.querySelector(`.block[data-id=\\"${{id}}\\"]`); if (b) affectedLists.add(b.parentElement); }}
   affectedLists.forEach(list => {{ const tFolder = list.closest('.folder'); const tName = tFolder ? tFolder.querySelector('.folder-title').value.trim() : ''; renumber(list, tName, false); if (tFolder) updateBadge(tFolder); }});
   closeBatchModal(true);
+  // Align images to folders by Unique_ID prefix after batch apply
+  syncByPrefix();
   sendOrder();
 }}
 
@@ -1072,6 +1825,15 @@ function randomizeIds() {{
     const block = document.querySelector(`.block[data-id=\\"${{id}}\\"]`);
     if (!block) continue;
     const ct = block.dataset.clothType;
+    // Scan dominant color from image and update color picker and dataset
+    const imgEl = block.querySelector('img.thumb');
+    const res = imgEl ? scanDominantColorFromImage(imgEl) : null;
+    if (res && res.hex && res.name) {{
+      const norm = res.name.replace(/\s+/g, '_').toLowerCase();
+      block.dataset.colorName = norm;
+      const picker = block.querySelector('.color-picker');
+      if (picker) picker.value = res.hex;
+    }}
     block.dataset.uniqueId = generateUniqueId(ct);
   }}
   const affected = new Set();
@@ -1079,12 +1841,51 @@ function randomizeIds() {{
     const b = document.querySelector(`.block[data-id=\\"${{id}}\\"]`); 
     if (b) affected.add(b.parentElement); 
   }}
-  affected.forEach(list => {{ 
-    const f = list.closest('.folder'); 
-    const t = f ? f.querySelector('.folder-title').value.trim() : ''; 
+  affected.forEach(list => {{
+    const f = list.closest('.folder');
+    const t = f ? (f.querySelector('.folder-title')?.value || '').trim() : '';
     renumber(list, t, false); // Don't force new UID for unselected images
-    if (f) updateBadge(f); 
+    if (f) updateBadge(f);
   }});
+  // Align images to folders by Unique_ID prefix after randomizing IDs
+  syncByPrefix();
+  sendOrder();
+}}
+
+function groupSelected() {{
+  const ids = Array.from(selectedIds);
+  if (ids.length < 2) {{ alert('Select two or more images to group'); return; }}
+  const sourceId = lastSelectedId || ids[ids.length-1];
+  const src = document.querySelector(`.block[data-id=\"${{sourceId}}\"]`);
+  if (!src) return;
+  const srcType = src.dataset.clothType;
+  const srcColor = src.dataset.colorName;
+  const destList = src.parentElement;
+  const colorHex = getColorHexFromName(srcColor);
+
+  const affectedLists = new Set([destList]);
+  for (const id of ids) {{
+    const block = document.querySelector(`.block[data-id=\"${{id}}\"]`);
+    if (!block || block === src) continue;
+    if (block.parentElement !== destList) {{
+      affectedLists.add(block.parentElement);
+      block.parentElement.removeChild(block);
+      destList.appendChild(block);
+    }}
+    block.dataset.clothType = srcType;
+    block.dataset.colorName = srcColor;
+    block.dataset.uniqueId = generateUniqueId(srcType);
+    const picker = block.querySelector('.color-picker');
+    if (picker && colorHex) picker.value = colorHex;
+  }}
+  affectedLists.forEach(list => {{
+    const folder = list.closest('.folder');
+    const tName = folder ? (folder.querySelector('.folder-title')?.value || '').trim() : srcType;
+    renumber(list, tName, false);
+    if (folder) updateBadge(folder);
+  }});
+  // Align images to folders by Unique_ID prefix
+  syncByPrefix();
   sendOrder();
 }}
 
@@ -1106,46 +1907,78 @@ function onDragEnd(evt) {{
         }}
         // Add to new parent
         toList.appendChild(other); 
-        // Update cloth type for all selected images
-        other.dataset.clothType = dragged.dataset.clothType;
+        // Preserve cloth type for selected images; only destination affects UID prefix later
       }}
     }}
   }}
 
   const targetFolder = toList.closest('.folder');
   if (targetFolder) {{
-    const tName = targetFolder.querySelector('.folder-title').value.trim();
+    const tName = (targetFolder.querySelector('.folder-title')?.value || '').trim();
     const moved = Array.from(toList.querySelectorAll('.block'));
     for (const b of moved) {{
       if (b === dragged || b.classList.contains('selected')) {{
+        // Update cloth type and Unique ID prefix to reflect new folder type
         b.dataset.clothType = tName;
+        ensureUidPrefixKeepDigits(b, tName, toList);
+        updateFilenameKeepNumbering(b);
       }}
     }}
+    // Renumber destination list to apply exact-match numbering
     renumber(toList, tName, false);
     updateBadge(targetFolder);
   }}
   const sourceFolder = fromList.closest('.folder');
   if (sourceFolder) {{
-    const sName = sourceFolder.querySelector('.folder-title').value.trim();
-    renumber(fromList, sName, false);
+    // No renumbering when items leave; numbering stays as-is on remaining items
     updateBadge(sourceFolder);
   }}
 
+  // Align images to folders by Unique_ID prefix
+  syncByPrefix();
   sendOrder();
 }}
 
 function onDelete() {{
+  // Folder delete flow with KEEP/DELETE/CANCEL
   if (selectedFolders.size > 0) {{
-    if (confirm('Delete selected folder(s) and all contents?')) {{
-      for (const fid of Array.from(selectedFolders)) {{
-        const folder = Array.from(folderGrid.children).find(f => String(f.dataset.folderId) === String(fid));
-        if (folder) folder.remove();
+    for (const fid of Array.from(selectedFolders)) {{
+      const folder = Array.from(document.querySelectorAll('#folderGrid .folder')).find(f => String(f.dataset.folderId) === String(fid));
+      if (!folder) continue;
+      const list = folder.querySelector('.list');
+      const count = list ? list.querySelectorAll('.block').length : 0;
+      if (count > 0) {{
+        const choice = (prompt('This folder contains images. Type KEEP to delete folder and move images to Draft, DELETE to remove folder and images, or CANCEL to abort.') || '').toUpperCase();
+        if (choice === 'CANCEL') {{ continue; }}
+        if (choice === 'KEEP') {{
+          const draftInfo = ensureFolder('Draft');
+          const items = Array.from(list.querySelectorAll('.block'));
+          for (const b of items) {{
+            list.removeChild(b);
+            draftInfo.list.appendChild(b);
+            b.dataset.clothType = 'Draft';
+            b.dataset.uniqueId = generateUniqueId('Draft');
+          }}
+          renumber(draftInfo.list, 'Draft', false);
+          updateBadge(draftInfo.folder);
+          folder.remove();
+        }} else if (choice === 'DELETE') {{
+          // Delete folder and images
+          folder.remove();
+        }} else {{
+          // Unknown input -> cancel
+          continue;
+        }}
+      }} else {{
+        folder.remove();
       }}
-      selectedFolders.clear();
-      sendOrder();
     }}
+    selectedFolders.clear();
+    sendOrder();
     return;
   }}
+
+  // Image delete
   if (selectedIds.size > 0) {{
     if (confirm('Delete selected image(s)?')) {{
       const affected = new Set();
@@ -1154,21 +1987,21 @@ function onDelete() {{
         if (block) {{ affected.add(block.parentElement); block.remove(); }}
       }}
       selectedIds.clear();
-      affected.forEach(list => {{
-        const tFolder = list.closest('.folder');
-        const tName = tFolder ? tFolder.querySelector('.folder-title').value.trim() : '';
-        renumber(list, tName, false);
-        if (tFolder) updateBadge(tFolder);
-      }});
+  affected.forEach(list => {{
+    const tFolder = list.closest('.folder');
+    const tName = tFolder ? (tFolder.querySelector('.folder-title')?.value || '').trim() : '';
+    renumber(list, tName, false);
+    if (tFolder) updateBadge(tFolder);
+  }});
       sendOrder();
     }}
   }}
 }}
 
 function sendOrder() {{
-  const folders = Array.from(folderGrid.children).map(folder => {{
+  const folders = Array.from(document.querySelectorAll('#folderGrid .folder')).map(folder => {{
     const folderId = folder.dataset.folderId;
-    const title = folder.querySelector('.folder-title').value;
+    const title = (folder.querySelector('.folder-title')?.value || '').trim();
     const items = Array.from(folder.querySelectorAll('.block')).map(b => {{
       const id = b.dataset.id;
       const input = b.querySelector('input.filename');
@@ -1190,10 +2023,10 @@ function sendOrder() {{
   }}, '*');
 }}
 
-function exportZip() {{
-  const folders = Array.from(folderGrid.children).map(folder => {{
+function exportZip(flatten=false) {{
+  const folders = Array.from(document.querySelectorAll('#folderGrid .folder')).map(folder => {{
     const folderId = folder.dataset.folderId;
-    const title = folder.querySelector('.folder-title').value;
+    const title = (folder.querySelector('.folder-title')?.value || '').trim();
     const items = Array.from(folder.querySelectorAll('.block')).map(b => {{
       const id = b.dataset.id;
       const input = b.querySelector('input.filename');
@@ -1211,7 +2044,7 @@ function exportZip() {{
   window.parent.postMessage({{
     isStreamlitMessage: true,
     type: 'streamlit:setComponentValue',
-    value: {{ mainItems, folders, export: true }}
+    value: {{ mainItems, folders, export: true, flatten }}
   }}, '*');
 }}
 
@@ -1223,30 +2056,14 @@ sendOrder();
 
 order = components.html(html_blocks, height=1200, scrolling=True)
 
-# Export button
-if st.button("📦 Export All Folders", type="primary"):
-    if isinstance(order, dict):
-        zip_data = create_export_zip(order, items)
-        if zip_data:
-            st.download_button(
-                "Download Export", 
-                data=zip_data, 
-                file_name="cloth_export.zip",
-                mime="application/zip"
-            )
-        else:
-            st.error("Failed to create export file")
-    else:
-        st.warning("No data to export. Please upload some images first.")
-
 # Handle export request from HTML component
 if isinstance(order, dict) and order.get("export"):
-    zip_data = create_export_zip(order, items)
+    flatten = bool(order.get("flatten", False))
+    zip_data = create_export_zip(order, items, flatten=flatten)
     if zip_data:
         st.download_button(
-            "Download Export", 
+            "Download Export" if not flatten else "Download Export (Flatten)", 
             data=zip_data, 
-            file_name="cloth_export.zip",
+            file_name="cloth_export.zip" if not flatten else "cloth_export_flat.zip",
             mime="application/zip"
         )
-
