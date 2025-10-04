@@ -109,7 +109,7 @@ STYLES_CSS = """
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-y; width: 100%; max-width: 100vw; }
 body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
@@ -174,6 +174,9 @@ body {
   display: flex;
   gap: var(--grid-gap);
   align-items: flex-start;
+  flex-wrap: wrap;
+  width: 100%;
+  overflow-x: hidden;
 }
 .column {
   display: flex;
@@ -324,14 +327,13 @@ body {
 }
 
 /* Floating Action Button */
-.fab { position: fixed; right: 24px; top: 50%; transform: translateY(-50%); z-index: 1000; }
+.fab { position: fixed; right: calc(24px + env(safe-area-inset-right)); bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 1000; }
 .fab-main {
   width: 64px; height: 64px; border-radius: 50%;
   border: 1px solid rgba(255,255,255,0.08);
   background: radial-gradient(100% 100% at 30% 30%, #1c2230 0%, #151a24 100%);
   color: var(--text);
-  display: grid; place-items: center; cursor: pointer; position: fixed;
-  right: 24px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; cursor: pointer; position: relative;
   z-index: 1001;
   box-shadow:
     0 22px 42px rgba(0,0,0,0.5),
@@ -357,8 +359,8 @@ body {
 
 /* FAB responsive sizing */
 @media (max-width: 640px) {
-  .fab { right: 16px; top: 50%; transform: translateY(-50%); z-index: 1000; }
-  .fab-main { width: 56px; height: 56px; right: 16px; top: 50%; transform: translateY(-50%); }
+  .fab { right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 1000; }
+  .fab-main { width: 56px; height: 56px; }
   .fab-actions { bottom: 68px; gap: 8px; }
   .fab-btn { width: 52px; height: 52px; }
 }
