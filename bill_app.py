@@ -116,6 +116,8 @@ body {
     Helvetica, Arial, \"Apple Color Emoji\", \"Segoe UI Emoji\";
   background: radial-gradient(60% 80% at 70% 20%, #12161c 0%, #0c0f13 100%);
   color: var(--text);
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 .app-header {
@@ -197,8 +199,19 @@ body {
   cursor: pointer;
   user-select: none;
 }
-.folder-header:hover { background: rgba(255,255,255,0.03); }
-.folder-title { font-weight: 600; font-size: 1.15rem; }
+  .folder-header:hover { background: rgba(255,255,255,0.03); }
+  .folder-title { font-weight: 600; font-size: 1.15rem; }
+  .folder-title-input {
+    font-weight: 600;
+    font-size: 1.15rem;
+    color: var(--text);
+    background: transparent;
+    border: 1px dashed rgba(255,255,255,0.15);
+    border-radius: 8px;
+    padding: 2px 6px;
+    flex: 1;
+    min-width: 0;
+  }
 .item-count {
   color: var(--muted);
   background: rgba(124,92,255,0.08);
@@ -224,6 +237,7 @@ body {
 }
 .content-inner { padding: 18px; display: grid; grid-template-columns: 1fr; gap: 14px; }
 /* Responsive: mobile 1 per row, desktop 2 per row */
+.file-cell { position: relative; transition: transform 240ms ease; will-change: transform; }
 @media (min-width: 1024px) {
   .content-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -310,13 +324,15 @@ body {
 }
 
 /* Floating Action Button */
-.fab { position: fixed; right: 24px; bottom: 24px; z-index: 50; }
+.fab { position: fixed; right: 24px; top: 50%; transform: translateY(-50%); z-index: 1000; }
 .fab-main {
   width: 64px; height: 64px; border-radius: 50%;
   border: 1px solid rgba(255,255,255,0.08);
   background: radial-gradient(100% 100% at 30% 30%, #1c2230 0%, #151a24 100%);
   color: var(--text);
-  display: grid; place-items: center; cursor: pointer; position: relative;
+  display: grid; place-items: center; cursor: pointer; position: fixed;
+  right: 24px; top: 50%; transform: translateY(-50%);
+  z-index: 1001;
   box-shadow:
     0 22px 42px rgba(0,0,0,0.5),
     0 0 0 2px rgba(124,92,255,0.15),
@@ -341,8 +357,8 @@ body {
 
 /* FAB responsive sizing */
 @media (max-width: 640px) {
-  .fab { right: 16px; bottom: 16px; }
-  .fab-main { width: 56px; height: 56px; }
+  .fab { right: 16px; top: 50%; transform: translateY(-50%); z-index: 1000; }
+  .fab-main { width: 56px; height: 56px; right: 16px; top: 50%; transform: translateY(-50%); }
   .fab-actions { bottom: 68px; gap: 8px; }
   .fab-btn { width: 52px; height: 52px; }
 }
@@ -409,6 +425,10 @@ const state = {
   images /** @type {Record<string, Image>} */: {},
   selectedFolders: new Set(),
   selectedImages: new Set(),
+  // Preserve horizontal scroll position of each folder's image strip
+  scrollLeftByFolder: {},
+  // Preserve vertical scroll position within each folder panel
+  scrollTopByFolder: {},
 };
 
 // Touch drag support for mobile
@@ -611,15 +631,29 @@ async function ingestFiles(files){
     const uid=createUniqueId(arr[0].clothType);
     arr.forEach((img,idx)=>{img.uniqueId=uid; img.setId=uid; img.setIndex=idx+1; img.setTotal=arr.length;});
   }
-  // Compose file names and place all new images into a single "Unsorted" folder
-  const typeName='Unsorted';
-  let folder=state.folders.find(f=>f.name===typeName);
-  if(!folder){folder={id:genId(),name:typeName,images:[]};state.folders.push(folder);}    
+  // Compose file names and place images into category folders based on clothType
+  function folderNameForType(t){
+    const tops=new Set(['t_shirt','hoodie','sweater','jacket','coat','blazer','tuxedo']);
+    const bottoms=new Set(['jeans','shorts','skirt','pants','trousers']);
+    const dresses=new Set(['dress','cocktail_dress','long_gown','gown']);
+    const hats=new Set(['hat','cap','beanie']);
+    if (tops.has(t)) return 'Tops';
+    if (bottoms.has(t)) return 'Bottoms';
+    if (dresses.has(t)) return 'Dresses';
+    if (hats.has(t)) return 'Hats';
+    return 'Unsorted';
+  }
+  const folderByName = new Map(state.folders.map(f => [f.name, f]));
   for(const img of newImages){
     const typePart=img.clothType; const shadePart=(img.colorName||'').toLowerCase().replace(/\s+/g,'_');
     const suffix=` ${img.setIndex} of ${img.setTotal}`;
     img.fileName=`${img.uniqueId}, ${typePart}_${shadePart}${suffix}`;
-    folder.images.push(img.id);
+    const fname = folderNameForType(typePart);
+    let f = folderByName.get(fname);
+    if (!f) { f = {id:genId(), name:fname, images:[]}; state.folders.push(f); folderByName.set(fname, f); }
+    f.images.push(img.id);
+    // Ensure ingested image Unique_id prefix matches destination folder's first letter
+    updateImageUniquePrefixByFolder(img.id, f.id);
   }
   render();
 }
@@ -642,39 +676,75 @@ function render(){
     const card=document.createElement('div');card.className='folder'+(state.selectedFolders.has(folder.id)?' selected':'');
     const header=document.createElement('div');header.className='folder-header';
     const title=document.createElement('div');title.className='folder-title';title.textContent=folder.name;
+    // Inline edit on title click
+    title.addEventListener('click',(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      beginFolderTitleInlineEdit(folder.id, title);
+    });
+    // Allow dragging folder only when dragging the title
+    title.draggable = true;
+    title.addEventListener('dragstart',(e)=>{
+      if(e.dataTransfer){ e.dataTransfer.setData('text/folder', folder.id); e.dataTransfer.effectAllowed='move'; }
+      card.classList.add('dragging-folder');
+    });
+    title.addEventListener('dragend',()=>{ card.classList.remove('dragging-folder'); });
     const count=document.createElement('div');count.className='item-count';count.textContent=`${folder.images.length} items`;
     header.appendChild(title);header.appendChild(count);
     const content=document.createElement('div');content.className='folder-content';
+    content.dataset.folderId = folder.id;
     if (folder.expanded) content.classList.add('expanded');
     const inner=document.createElement('div');inner.className='content-inner';
-    // allow dropping onto folder content to move images here
-    inner.addEventListener('dragover',(e)=>{e.preventDefault();});
-    inner.addEventListener('drop',(e)=>{e.preventDefault();const draggedId=e.dataTransfer?.getData('text/plain');if(!draggedId) return; moveImageToFolder(draggedId, folder.id);});
+    inner.dataset.folderId = folder.id;
+    // Track scroll positions as user navigates within the folder
+    content.addEventListener('scroll', ()=>{ state.scrollTopByFolder[folder.id] = content.scrollTop; });
+    inner.addEventListener('scroll', ()=>{ state.scrollLeftByFolder[folder.id] = inner.scrollLeft; });
+    // allow dropping onto folder content to insert at precise position
+    inner.addEventListener('dragover',(e)=>{e.preventDefault(); e.stopPropagation(); if(e.dataTransfer) e.dataTransfer.dropEffect='move';});
+    inner.addEventListener('drop',(e)=>{e.preventDefault(); e.stopPropagation(); const draggedId=e.dataTransfer?.getData('text/plain'); if(!draggedId) return; const idx=findInsertIndexFromPoint(inner, folder.id, e.clientY||0); insertImageAtIndex(draggedId, folder.id, idx);});
     // mobile touch: drop when touch ends inside this folder
-    inner.addEventListener('touchend',()=>{ if(touchDragId){ moveImageToFolder(touchDragId, folder.id); touchDragId=null; } });
-    // also accept drop on full card area
-    card.addEventListener('dragover',(e)=>{e.preventDefault();});
-    card.addEventListener('drop',(e)=>{e.preventDefault();const draggedId=e.dataTransfer?.getData('text/plain');if(!draggedId) return; moveImageToFolder(draggedId, folder.id);});
+    inner.addEventListener('touchend',()=>{ if(touchDragId){ if(touchHoverId && touchHoverId!==touchDragId){ swapOrInsertWithinFolder(touchDragId, touchHoverId); } else { moveImageToFolder(touchDragId, folder.id); } touchDragId=null; touchHoverId=null; } });
+    // also accept drop on full card area with positional insert
+    card.addEventListener('dragover',(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      if(e.dataTransfer){ e.dataTransfer.dropEffect='move'; }
+    });
+    card.addEventListener('drop',(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const draggedFolderId = e.dataTransfer?.getData('text/folder');
+      if(draggedFolderId){
+        // Swap folders (positions) when a folder is dropped onto another folder
+        if(draggedFolderId!==folder.id){ swapFoldersById(draggedFolderId, folder.id); }
+        return;
+      }
+      // Fallback: handle image drop into this folder with positional insert
+      const draggedImageId=e.dataTransfer?.getData('text/plain');
+      if(!draggedImageId) return;
+      const innerEl=card.querySelector('.content-inner')||inner;
+      const idx=findInsertIndexFromPoint(innerEl, folder.id, e.clientY||0);
+      insertImageAtIndex(draggedImageId, folder.id, idx);
+    });
     folder.images.forEach(imgId=>{
       const img=state.images[imgId];
       const cell=document.createElement('div');
       cell.className='file-cell';
+      cell.dataset.imgId = img.id;
       const thumb=document.createElement('div');thumb.className='thumb'+(state.selectedImages.has(img.id)?' selected':'');
       thumb.dataset.imgId = img.id;
       thumb.dataset.folderId = folder.id;
       thumb.draggable=true;
-      thumb.addEventListener('dragstart',(e)=>{e.dataTransfer?.setData('text/plain', img.id);thumb.classList.add('dragging');});
+      thumb.addEventListener('dragstart',(e)=>{ if(e.dataTransfer){ e.dataTransfer.setData('text/plain', img.id); e.dataTransfer.effectAllowed='move'; } thumb.classList.add('dragging'); });
       thumb.addEventListener('dragend',()=>{thumb.classList.remove('dragging');});
-      // allow drop onto a thumbnail to swap/reposition
-      thumb.addEventListener('dragover',(e)=>{e.preventDefault();thumb.classList.add('drop-target');});
+      // allow drop onto a thumbnail to reorder (move-before target)
+      thumb.addEventListener('dragover',(e)=>{e.preventDefault(); e.stopPropagation(); if(e.dataTransfer) e.dataTransfer.dropEffect='move'; thumb.classList.add('drop-target');});
       thumb.addEventListener('dragleave',()=>{thumb.classList.remove('drop-target');});
-      thumb.addEventListener('drop',(e)=>{e.preventDefault();const draggedId=e.dataTransfer?.getData('text/plain');thumb.classList.remove('drop-target');if(!draggedId) return; swapOrInsertWithinFolder(draggedId, img.id);});
+      thumb.addEventListener('drop',(e)=>{e.preventDefault(); e.stopPropagation(); const draggedId=e.dataTransfer?.getData('text/plain'); thumb.classList.remove('drop-target'); if(!draggedId) return; moveImageBeforeTarget(draggedId, img.id);});
       // mobile touch drag
       thumb.addEventListener('touchstart',()=>{touchDragId=img.id;thumb.classList.add('dragging');});
       thumb.addEventListener('touchend',()=>{
         thumb.classList.remove('dragging');
         if(touchDragId && touchHoverId && touchHoverId!==touchDragId){
-          swapOrInsertWithinFolder(touchDragId, touchHoverId);
+          moveImageBeforeTarget(touchDragId, touchHoverId);
         }
         document.querySelectorAll('.thumb.drop-target').forEach(th=>th.classList.remove('drop-target'));
         touchDragId=null; touchHoverId=null;
@@ -695,10 +765,35 @@ function render(){
       });
       meta.appendChild(name);meta.appendChild(picker);
       cell.appendChild(thumb);cell.appendChild(meta);
-      thumb.addEventListener('click',(e)=>{const multi=e.ctrlKey||e.metaKey;if(!multi)state.selectedImages.clear();if(state.selectedImages.has(img.id))state.selectedImages.delete(img.id);else state.selectedImages.add(img.id); render();});
+      // Toggle selection without full re-render to preserve scroll position
+      thumb.addEventListener('click',(e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const multi = e.ctrlKey || e.metaKey;
+        if (!multi) {
+          // Clear previous selections visually and in state
+          state.selectedImages.clear();
+          document.querySelectorAll('.thumb.selected').forEach(el=>el.classList.remove('selected'));
+        }
+        if (state.selectedImages.has(img.id)) {
+          state.selectedImages.delete(img.id);
+          thumb.classList.remove('selected');
+        } else {
+          state.selectedImages.add(img.id);
+          thumb.classList.add('selected');
+        }
+        // No render() call here to avoid resetting scroll
+      });
       inner.appendChild(cell);
     });
     content.appendChild(inner);
+    // Restore saved scroll positions after DOM is attached
+    requestAnimationFrame(()=>{
+      const savedTop = state.scrollTopByFolder && state.scrollTopByFolder[folder.id];
+      if (savedTop != null) content.scrollTop = savedTop;
+      const savedLeft = state.scrollLeftByFolder && state.scrollLeftByFolder[folder.id];
+      if (savedLeft != null) inner.scrollLeft = savedLeft;
+    });
     header.addEventListener('click',(e)=>{
       const multi=e.ctrlKey||e.metaKey;
       if(!multi) state.selectedFolders.clear();
@@ -712,10 +807,68 @@ function render(){
 }
 
 // Actions
-dom.actionAdd.addEventListener('click',()=>{const name=prompt('New folder name');if(!name)return;state.folders.push({id:genId(),name,images:[]});render();});
-dom.actionEdit.addEventListener('click',()=>{if(state.selectedFolders.size!==1){alert('Select exactly one folder to rename.');return;}const fid=[...state.selectedFolders][0];const folder=state.folders.find(f=>f.id===fid);const name=prompt('Folder name',folder?.name||'');if(!name||!folder)return;folder.name=name;render();});
+// Ensure folder name is unique by appending incrementing suffix " (n)"
+function ensureUniqueFolderName(baseName, skipFolderId){
+  let name=(baseName||'').trim();
+  if(!name) name='Untitled';
+  const existing=new Set(state.folders.filter(f=>!skipFolderId || f.id!==skipFolderId).map(f=>f.name));
+  if(!existing.has(name)) return name;
+  let n=2;
+  let candidate;
+  do { candidate = `${name} (${n})`; n++; } while(existing.has(candidate));
+  return candidate;
+}
+
+dom.actionAdd.addEventListener('click',()=>{
+  const raw=prompt('New folder name');
+  if(raw==null) return;
+  const name=ensureUniqueFolderName(raw);
+  state.folders.push({id:genId(),name,images:[]});
+  render();
+});
+dom.actionEdit.addEventListener('click',()=>{
+  if(state.selectedFolders.size!==1){alert('Select exactly one folder to rename.');return;}
+  const fid=[...state.selectedFolders][0];
+  const folder=state.folders.find(f=>f.id===fid);
+  const raw=prompt('Folder name',folder?.name||'');
+  if(raw==null||!folder) return;
+  const name=ensureUniqueFolderName(raw, folder.id);
+  if(!name) return;
+  folder.name=name;
+  updateUniqueIdPrefixForFolder(folder.id);
+  recomputeSetIndicesAndNames();
+  render();
+});
 dom.actionDelete.addEventListener('click',()=>{if(state.selectedFolders.size<1){alert('Select folder(s) to delete.');return;}const ids=new Set(state.selectedFolders);state.folders=state.folders.filter(f=>!ids.has(f.id));render();});
-dom.actionRandom.addEventListener('click',()=>{if(state.selectedImages.size<1){alert('Select image(s) to assign new Unique ID.');return;}const uid=createUniqueId('x');state.selectedImages.forEach(id=>{const img=state.images[id];img.uniqueId=uid;const typePart=img.clothType;const shadePart=(img.colorName||'').replace(/\s+/g,'_');const suffix=` ${img.setIndex||1} of ${img.setTotal||1}`;img.fileName=`${img.uniqueId}, ${typePart}_${shadePart}${suffix}`;});render();});
+dom.actionRandom.addEventListener('click', async()=>{
+  if(state.selectedImages.size<1){alert('Select image(s) to assign new Unique ID.');return;}
+  for(const id of state.selectedImages){
+    const img=state.images[id]; if(!img) continue;
+    const folder=state.folders.find(f=>f.images.includes(id));
+    const letter=getFolderInitial(folder);
+    const digits=generateUnusedDigitsForFolder(folder?.id);
+    img.uniqueId=`${letter}${digits}`;
+    // Cloth type = Folder name
+    if(folder){ img.clothType = folder.name; }
+    // Detect garment dominant color (ignore background) and update picker
+    const hex=await getDominantGarmentColor(img.dataUrl);
+    img.colorCode=hex;
+    const nearest=nearestTailwindColor(hexToRgb(hex));
+    img.twFamily=nearest.family; img.twShade=nearest.shade; img.colorName=nearest.name;
+    img.colorShadesList=generateAllShadeCombos(nearest.family);
+    // Compose filename
+    const typePart=img.clothType; const shadePart=(img.colorName||'').toLowerCase().replace(/\s+/g,'_');
+    const suffix=` ${img.setIndex||1} of ${img.setTotal||1}`;
+    img.fileName=`${img.uniqueId}, ${typePart}_${shadePart}${suffix}`;
+    // Real-time in-place UI update without full re-render
+    const cell=document.querySelector(`.file-cell[data-img-id="${id}"]`) || document.querySelector(`.thumb[data-img-id="${id}"]`)?.closest('.file-cell');
+    if(cell){
+      const nameEl=cell.querySelector('.file-meta .name'); if(nameEl) nameEl.textContent=img.fileName;
+      const picker=cell.querySelector('.color-picker'); if(picker) picker.value=hex;
+    }
+  }
+  // Avoid full render to keep scroll/selection stable
+});
 dom.actionSwap.addEventListener('click',()=>{if(state.selectedFolders.size!==2){alert('Select exactly two folders to swap.');return;}const [aId,bId]=[...state.selectedFolders];const ai=state.folders.findIndex(f=>f.id===aId);const bi=state.folders.findIndex(f=>f.id===bId);if(ai<0||bi<0)return;const tmp=state.folders[ai];state.folders[ai]=state.folders[bi];state.folders[bi]=tmp;render();});
 dom.actionExport.addEventListener('click',()=>{dom.exportMenu.classList.toggle('show');});
 dom.exportWith.addEventListener('click',()=>{downloadImages(true)});
@@ -744,28 +897,294 @@ function downloadImages(withFolders){
 }
 
 function moveImageToFolder(imgId,targetFolderId){
+  const last=capturePositions();
+  captureFolderScrollTops();
   const folder=state.folders.find(f=>f.id===targetFolderId); if(!folder) return;
   for(const f of state.folders){const idx=f.images.indexOf(imgId); if(idx>=0){f.images.splice(idx,1); break;}}
   folder.images.push(imgId);
+  // Ensure the moved image's Unique ID prefix matches the folder's first letter
+  updateImageUniquePrefixByFolder(imgId, targetFolderId);
   render();
+  applyFLIP(last);
+}
+// Capture positions for FLIP animation
+function capturePositions(){
+  const map=new Map();
+  document.querySelectorAll('.file-cell').forEach(cell=>{
+    const id=cell.dataset.imgId || cell.querySelector('.thumb')?.dataset.imgId;
+    if(!id) return; map.set(id, cell.getBoundingClientRect());
+  });
+  return map;
+}
+// Apply FLIP animation based on previous positions
+function applyFLIP(prev){
+  const cells=document.querySelectorAll('.file-cell');
+  cells.forEach(cell=>{
+    const id=cell.dataset.imgId || cell.querySelector('.thumb')?.dataset.imgId;
+    const before=prev.get(id); if(!before) return;
+    const after=cell.getBoundingClientRect();
+    const dx=before.left - after.left; const dy=before.top - after.top;
+    if(Math.abs(dx)>0.5 || Math.abs(dy)>0.5){
+      try {
+        cell.animate([
+          { transform: `translate(${dx}px, ${dy}px)` },
+          { transform: 'translate(0, 0)' }
+        ], { duration: 240, easing: 'ease' });
+      } catch (_) {
+        // Fallback in case WAAPI not available
+        cell.style.transition='none';
+        cell.style.transform=`translate(${dx}px, ${dy}px)`;
+        void cell.getBoundingClientRect();
+        cell.style.transition='transform 240ms ease';
+        cell.style.transform='translate(0,0)';
+        setTimeout(()=>{cell.style.transition=''; cell.style.transform='';},260);
+      }
+    }
+  });
+}
+// Insert at specific position within a folder
+function insertImageAtIndex(imgId,targetFolderId,insertIndex){
+  const last=capturePositions();
+  captureFolderScrollTops();
+  const folder=state.folders.find(f=>f.id===targetFolderId); if(!folder) return;
+  for(const f of state.folders){const idx=f.images.indexOf(imgId); if(idx>=0){f.images.splice(idx,1); break;}}
+  const clamped=Math.max(0, Math.min(insertIndex, folder.images.length));
+  folder.images.splice(clamped, 0, imgId);
+  // Ensure the moved image's Unique ID prefix matches the folder's first letter
+  updateImageUniquePrefixByFolder(imgId, targetFolderId);
+  render();
+  applyFLIP(last);
+}
+// Determine insert index from pointer Y relative to existing cells
+function findInsertIndexFromPoint(containerEl, folderId, clientY){
+  const cells=Array.from(containerEl.querySelectorAll('.file-cell'));
+  if(!cells.length){
+    const folder=state.folders.find(f=>f.id===folderId);
+    return folder ? folder.images.length : 0;
+  }
+  for(let i=0;i<cells.length;i++){
+    const rect=cells[i].getBoundingClientRect();
+    const mid=rect.top + rect.height/2;
+    if(clientY < mid) return i;
+  }
+  return cells.length;
 }
 
-// Swap within same folder or insert before the target in another folder
-function swapOrInsertWithinFolder(dragId,targetId){
+// Move dragged image before the target image (reorder-only, no swap)
+function moveImageBeforeTarget(dragId,targetId){
   if(dragId===targetId) return;
+  const last=capturePositions();
+  captureFolderScrollTops();
   const srcFolder=state.folders.find(f=>f.images.includes(dragId));
   const destFolder=state.folders.find(f=>f.images.includes(targetId));
   if(!destFolder) return;
-  const targetIndex=destFolder.images.indexOf(targetId);
+  let targetIndex=destFolder.images.indexOf(targetId);
   if(srcFolder && srcFolder.id===destFolder.id){
     const srcIndex=srcFolder.images.indexOf(dragId);
     if(srcIndex<0 || targetIndex<0) return;
-    [srcFolder.images[srcIndex], srcFolder.images[targetIndex]] = [srcFolder.images[targetIndex], srcFolder.images[srcIndex]];
+    // remove drag first
+    srcFolder.images.splice(srcIndex,1);
+    // adjust target index if removal was before target
+    if(srcIndex < targetIndex) targetIndex -= 1;
+    destFolder.images.splice(targetIndex,0,dragId);
   } else {
     if(srcFolder){const si=srcFolder.images.indexOf(dragId); if(si>=0) srcFolder.images.splice(si,1);}    
     destFolder.images.splice(targetIndex,0,dragId);
   }
+  // Ensure the moved image's Unique ID prefix matches the destination folder's first letter
+  updateImageUniquePrefixByFolder(dragId, destFolder.id);
   render();
+  applyFLIP(last);
+}
+// Capture current vertical scroll positions for all folders before a re-render
+function captureFolderScrollTops(){
+  document.querySelectorAll('.folder-content').forEach(el=>{
+    const fid = el.dataset.folderId;
+    if (fid) state.scrollTopByFolder[fid] = el.scrollTop;
+  });
+}
+// Helper: get folder initial letter (uppercase)
+function getFolderInitial(folder){
+  return (folder?.name||'').trim().charAt(0).toUpperCase()||'X';
+}
+// Update a single image's Unique ID prefix to match its folder's first letter
+function updateImageUniquePrefixByFolder(imgId, folderId){
+  const folder=state.folders.find(f=>f.id===folderId); if(!folder) return;
+  const img=state.images[imgId]; if(!img) return;
+  const letter=getFolderInitial(folder);
+  const old = img.uniqueId || '';
+  const digits = old && old.length>1 ? old.slice(1) : String(Math.floor(100000+Math.random()*900000));
+  img.uniqueId = `${letter}${digits}`;
+  const typePart=img.clothType; const shadePart=(img.colorName||'').toLowerCase().replace(/\s+/g,'_'); const suffix=` ${img.setIndex||1} of ${img.setTotal||1}`;
+  img.fileName=`${img.uniqueId}, ${typePart}_${shadePart}${suffix}`;
+}
+  // Update all images in a folder to have Unique ID prefix = folder's first letter
+  function updateUniqueIdPrefixForFolder(folderId){
+    const folder=state.folders.find(f=>f.id===folderId); if(!folder) return;
+    const letter=getFolderInitial(folder);
+    folder.images.forEach(imgId=>{
+      const img=state.images[imgId]; if(!img) return;
+      const old = img.uniqueId || '';
+      const digits = old && old.length>1 ? old.slice(1) : String(Math.floor(100000+Math.random()*900000));
+      img.uniqueId = `${letter}${digits}`;
+      const typePart=img.clothType; const shadePart=(img.colorName||'').toLowerCase().replace(/\s+/g,'_'); const suffix=` ${img.setIndex||1} of ${img.setTotal||1}`;
+      img.fileName=`${img.uniqueId}, ${typePart}_${shadePart}${suffix}`;
+    });
+  }
+
+  // Swap two folders by id: swap their positions in the folders array
+  function swapFoldersById(aId,bId){
+    if(!aId || !bId || aId===bId) return;
+    const ai=state.folders.findIndex(f=>f.id===aId);
+    const bi=state.folders.findIndex(f=>f.id===bId);
+    if(ai<0 || bi<0) return;
+    // Preserve scroll positions before re-render
+    captureFolderScrollTops();
+    // Swap positions (the folder objects carry their items and name)
+    const tmp=state.folders[ai];
+    state.folders[ai]=state.folders[bi];
+    state.folders[bi]=tmp;
+    render();
+  }
+
+  // Begin inline editing for a folder's title
+  function beginFolderTitleInlineEdit(folderId, titleEl){
+    const folder=state.folders.find(f=>f.id===folderId); if(!folder) return;
+    const input=document.createElement('input');
+    input.type='text';
+    input.className='folder-title-input';
+    input.value=folder.name||'';
+    input.setAttribute('aria-label','Edit folder name');
+    // Prevent header click toggles while editing
+    ['click','mousedown','mouseup'].forEach(ev=>{
+      input.addEventListener(ev,(e)=>{ e.stopPropagation(); });
+    });
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+    const finish=(commit)=>{
+      input.removeEventListener('blur', onBlur);
+      input.removeEventListener('keydown', onKey);
+      if(commit){
+        const newName=(input.value||'').trim();
+        if(newName && newName!==folder.name){
+          // Preserve scroll positions before re-render
+          captureFolderScrollTops();
+          const uniqueName = ensureUniqueFolderName(newName, folder.id);
+          folder.name=uniqueName;
+          // Update Unique ID prefixes to match new folder initial
+          updateUniqueIdPrefixForFolder(folder.id);
+          // Recompute names and indices, then re-render
+          recomputeSetIndicesAndNames();
+          render();
+          return; // render replaced DOM
+        }
+      }
+      // Cancel or no change: restore title element in place
+      const t=document.createElement('div');
+      t.className='folder-title';
+      t.textContent=folder.name||'';
+      t.addEventListener('click',(e)=>{ e.preventDefault(); e.stopPropagation(); beginFolderTitleInlineEdit(folder.id, t); });
+      // Keep dragging restricted to title
+      t.draggable = true;
+      // We need card element to toggle class on drag; find nearest card
+      const cardEl = input.closest('.folder');
+      t.addEventListener('dragstart',(e)=>{
+        if(e.dataTransfer){ e.dataTransfer.setData('text/folder', folder.id); e.dataTransfer.effectAllowed='move'; }
+        if(cardEl) cardEl.classList.add('dragging-folder');
+      });
+      t.addEventListener('dragend',()=>{ if(cardEl) cardEl.classList.remove('dragging-folder'); });
+      input.replaceWith(t);
+    };
+    const onBlur=()=>finish(true);
+    const onKey=(e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); finish(true); }
+      else if(e.key==='Escape'){ e.preventDefault(); finish(false); }
+    };
+    input.addEventListener('blur', onBlur);
+    input.addEventListener('keydown', onKey);
+  }
+
+  // Rule: For images in a folder that are "1 of 1" and whose cloth_type
+  // does NOT equal the folder name, change Unique_id to a new value
+  // composed of the folder's first letter + unused 6 digits within that folder.
+  function applySingletonMismatchRuleToFolder(folderId){
+    const folder=state.folders.find(f=>f.id===folderId); if(!folder) return;
+    const letter=getFolderInitial(folder);
+    folder.images.forEach(imgId=>{
+      const img=state.images[imgId]; if(!img) return;
+      const isSingleton=(img.setTotal||1)===1;
+      const clothMismatch=(img.clothType||'').trim() !== (folder.name||'').trim();
+      if(isSingleton && clothMismatch){
+        const digits=generateUnusedDigitsForFolder(folderId);
+        img.uniqueId=`${letter}${digits}`;
+        img.setId=img.uniqueId; img.setIndex=1; img.setTotal=1;
+        const typePart=img.clothType; const shadePart=(img.colorName||'').toLowerCase().replace(/\s+/g,'_');
+        const suffix=` ${img.setIndex} of ${img.setTotal}`;
+        img.fileName=`${img.uniqueId}, ${typePart}_${shadePart}${suffix}`;
+      }
+    });
+  }
+
+// Generate a 6-digit number not used by any image in the folder
+function generateUnusedDigitsForFolder(folderId){
+  const folder=state.folders.find(f=>f.id===folderId);
+  const used=new Set();
+  if(folder){
+    folder.images.forEach(imgId=>{
+      const u=state.images[imgId]?.uniqueId||'';
+      const d = u && u.length>1 ? u.slice(1) : null;
+      if(d) used.add(d);
+    });
+  }
+  let digits;
+  do { digits = String(Math.floor(100000+Math.random()*900000)); } while(used.has(digits));
+  return digits;
+}
+
+// Compute dominant garment color by sampling central region and filtering near-white backgrounds
+async function getDominantGarmentColor(dataUrl){
+  try{
+    const imgEl=await (new Promise((resolve,reject)=>{ const im=new Image(); im.onload=()=>resolve(im); im.onerror=reject; im.src=dataUrl; }));
+    const w=imgEl.naturalWidth||imgEl.width; const h=imgEl.naturalHeight||imgEl.height;
+    const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    if(!ctx){ return '#000000'; }
+    ctx.drawImage(imgEl,0,0,w,h);
+    const cx=Math.floor(w*0.2), cy=Math.floor(h*0.2), cw=Math.floor(w*0.6), ch=Math.floor(h*0.6);
+    const imgData=ctx.getImageData(cx,cy,cw,ch).data;
+    let r=0,g=0,b=0,count=0;
+    for(let i=0;i<imgData.length;i+=4){
+      const rr=imgData[i], gg=imgData[i+1], bb=imgData[i+2], aa=imgData[i+3];
+      if(aa===0) continue;
+      const max=Math.max(rr,gg,bb), min=Math.min(rr,gg,bb);
+      const sat=max-min;
+      // Filter out near-white and very dark pixels likely background/noise
+      if(max<20) continue;
+      if(sat<10 && max>220) continue;
+      // Filter likely skin tones via HSV hue range and moderate saturation
+      const r1=rr/255, g1=gg/255, b1=bb/255;
+      const cmax=Math.max(r1,g1,b1), cmin=Math.min(r1,g1,b1);
+      const delta=cmax-cmin;
+      let hue=0;
+      if(delta>0){
+        if(cmax===r1){ hue=((g1-b1)/delta)%6; }
+        else if(cmax===g1){ hue=(b1-r1)/delta+2; }
+        else { hue=(r1-g1)/delta+4; }
+        hue*=60; if(hue<0) hue+=360;
+      }
+      const satN = cmax===0?0:delta/cmax;
+      const valN = cmax;
+      // Exclude hues commonly associated with skin (approx 10°–50°), moderate saturation
+      if(hue>=10 && hue<=50 && satN>=0.15 && satN<=0.75 && valN>0.2) continue;
+      r+=rr; g+=gg; b+=bb; count++;
+    }
+    if(count===0){ return rgbToHex({r,g,b}); }
+    r=Math.round(r/count); g=Math.round(g/count); b=Math.round(b/count);
+    return rgbToHex({r,g,b});
+  } catch(_){
+    return '#000000';
+  }
 }
 
 function recomputeSetIndicesAndNames(){
@@ -776,6 +1195,10 @@ function recomputeSetIndicesAndNames(){
     const uid=createUniqueId(arr[0].clothType);
     arr.forEach((img,idx)=>{img.uniqueId=img.uniqueId||uid; img.setId=uid; img.setIndex=idx+1; img.setTotal=arr.length;});
   }
+  // Enforce Unique_id first-letter to match folder name for all images
+  state.folders.forEach(f=>updateUniqueIdPrefixForFolder(f.id));
+  // Apply rule: if cloth_type != folder name and image is 1 of 1, change Unique_id
+  state.folders.forEach(f=>applySingletonMismatchRuleToFolder(f.id));
   for(const img of imgs){const typePart=img.clothType; const shadePart=(img.colorName||'').toLowerCase().replace(/\s+/g,'_'); const suffix=` ${img.setIndex||1} of ${img.setTotal||1}`; img.fileName=`${img.uniqueId}, ${typePart}_${shadePart}${suffix}`;}
 }
 
