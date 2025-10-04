@@ -622,18 +622,18 @@ html_blocks = f"""
   .stFileUploader .uploadedFiles {{ display: none !important; }}
   /* Responsive overrides */
   @media (max-width: 768px) {{
-    :root {{ --zoom: 1; --card-w: 180px; }}}
-    .toolbar {{ flex-wrap: wrap; gap: 10px; padding: 8px 12px; }}}
-    .folder-grid {{ grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }}}
-    .folder-grid.grid-fixed {{ grid-template-columns: repeat(2, 1fr); }}}
-    .btn, .add-folder-btn, .edit-btn {{ font-size: 13px; padding: 8px 12px; }}}
+    :root {{ --zoom: 1; --card-w: 180px; }}
+    .toolbar {{ flex-wrap: wrap; gap: 10px; padding: 8px 12px; }}
+    .folder-grid {{ grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }}
+    .folder-grid.grid-fixed {{ grid-template-columns: repeat(2, 1fr); }}
+    .btn, .add-folder-btn, .edit-btn {{ font-size: 13px; padding: 8px 12px; }}
   }}
   @media (max-width: 480px) {{
-    :root {{ --zoom: 0.9; --card-w: 150px; }}}
-    .toolbar {{ flex-wrap: wrap; gap: 8px; padding: 8px 10px; }}}
-    .folder-grid {{ grid-template-columns: 1fr; }}}
-    .folder-grid.grid-fixed {{ grid-template-columns: 1fr; }}}
-    .btn, .add-folder-btn, .edit-btn {{ font-size: 12px; padding: 8px 10px; }}}
+    :root {{ --zoom: 0.9; --card-w: 150px; }}
+    .toolbar {{ flex-wrap: wrap; gap: 8px; padding: 8px 10px; }}
+    .folder-grid {{ grid-template-columns: 1fr; }}
+    .folder-grid.grid-fixed {{ grid-template-columns: 1fr; }}
+    .btn, .add-folder-btn, .edit-btn {{ font-size: 12px; padding: 8px 10px; }}
   }}
   
   :root {{ --zoom: 1; --card-w: 240px; }}
