@@ -569,7 +569,12 @@ if not items:
 blocks_data = [{
     "id": it["id"],
     "unique_id": f"C{1000 + it['id']}",
-    "cloth_type": (lambda ct: ct if ct else (folder_name or "New Folder"))(STYLE_MAP.get((it["cloth_style"] or "").lower(), (it["cloth_style"] or "").replace(" ", "_").capitalize())),
+    "cloth_type": (
+        STYLE_MAP.get(
+            (it.get("cloth_style") or "").lower(),
+            (it.get("cloth_style") or "").replace(" ", "_").capitalize()
+        ) or "New Folder"
+    ),
     "color_raw": it["color"],
     "color_norm": it["color"].replace(" ", "_").lower(),
     "rgb": it["rgb"],
