@@ -327,14 +327,23 @@ body {
 }
 
 /* Floating Action Button */
-.fab { position: fixed; right: calc(24px + env(safe-area-inset-right)); bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 1000; }
+.fab {
+  position: fixed;
+  right: calc(24px + env(safe-area-inset-right));
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  z-index: 10000; /* ensure above all app content */
+  pointer-events: none; /* let clicks pass except on children */
+  isolation: isolate; /* create its own stacking context */
+}
 .fab-main {
   width: 64px; height: 64px; border-radius: 50%;
   border: 1px solid rgba(255,255,255,0.08);
   background: radial-gradient(100% 100% at 30% 30%, #1c2230 0%, #151a24 100%);
   color: var(--text);
   display: grid; place-items: center; cursor: pointer; position: relative;
-  z-index: 1001;
+  z-index: 10001;
+  pointer-events: auto; /* clickable even though parent ignores events */
+  touch-action: none; /* allow drag without scrolling on mobile */
   box-shadow:
     0 22px 42px rgba(0,0,0,0.5),
     0 0 0 2px rgba(124,92,255,0.15),
@@ -343,7 +352,7 @@ body {
 }
 .fab-main:hover { transform: translateY(-2px); box-shadow: 0 28px 58px rgba(0,0,0,0.55), 0 0 0 2px rgba(124,92,255,0.22), 0 0 36px rgba(124,92,255,0.45); }
 .fab-main .icon { width: 28px; height: 28px; color: var(--accent-2); }
-.fab-actions { position: absolute; right: 0; bottom: 76px; display: none; gap: 10px; }
+.fab-actions { position: absolute; right: 0; bottom: 76px; display: none; gap: 10px; pointer-events: auto; }
 .fab.open .fab-actions { display: grid; }
 .fab-btn {
   width: 44px; height: 44px; border-radius: 12px;
@@ -353,6 +362,7 @@ body {
   display: grid; place-items: center; cursor: pointer;
   box-shadow: 0 10px 20px rgba(0,0,0,0.35), 0 0 16px rgba(91,157,255,0.2);
   transition: transform 160ms ease, box-shadow 200ms ease;
+  pointer-events: auto;
 }
 .fab-btn:hover { transform: translateY(-1px); box-shadow: 0 16px 28px rgba(0,0,0,0.45), 0 0 22px rgba(91,157,255,0.26); }
 .fab-btn .icon { width: 22px; height: 22px; color: var(--text); }
@@ -377,6 +387,7 @@ body {
   box-shadow: 0 16px 28px rgba(0,0,0,0.45), 0 0 24px rgba(91,157,255,0.26);
   padding: 8px;
   gap: 8px;
+  pointer-events: auto;
 }
 .export-menu.show { display: grid; }
 .menu-btn {
@@ -889,6 +900,74 @@ document.addEventListener('touchmove',(e)=>{
   const thumbEl=el && el.closest ? el.closest('.thumb') : null;
   if(thumbEl){ thumbEl.classList.add('drop-target'); touchHoverId=thumbEl.dataset.imgId||null; } else { touchHoverId=null; }
 }, {passive:false});
+
+// Draggable FabMain: allow dragging anywhere and persist position
+(() => {
+  const clamp=(v,min,max)=>Math.max(min, Math.min(max, v));
+  const saved=localStorage.getItem('fabPos');
+  if(saved){
+    try{
+      const pos=JSON.parse(saved);
+      if(typeof pos.left==='number' && typeof pos.top==='number'){
+        dom.fab.style.left=`${pos.left}px`;
+        dom.fab.style.top=`${pos.top}px`;
+        dom.fab.style.right='auto';
+        dom.fab.style.bottom='auto';
+      }
+    }catch(_){/* ignore bad storage */}
+  }
+  let dragging=false, moved=false, offsetX=0, offsetY=0, suppressNextClick=false;
+  function beginDrag(clientX, clientY){
+    const rect=dom.fab.getBoundingClientRect();
+    offsetX=clientX-rect.left; offsetY=clientY-rect.top;
+    dragging=true; moved=false;
+    document.body.style.userSelect='none';
+  }
+  function updateDrag(clientX, clientY){
+    if(!dragging) return;
+    moved=true;
+    const vw=window.innerWidth, vh=window.innerHeight;
+    const rect=dom.fab.getBoundingClientRect();
+    const w=rect.width, h=rect.height;
+    let left=clientX-offsetX; let top=clientY-offsetY;
+    left=clamp(left, 0, vw-w); top=clamp(top, 0, vh-h);
+    dom.fab.style.left=`${left}px`; dom.fab.style.top=`${top}px`;
+    dom.fab.style.right='auto'; dom.fab.style.bottom='auto';
+  }
+  function endDrag(){
+    if(!dragging) return;
+    dragging=false; document.body.style.userSelect='';
+    if(moved){
+      suppressNextClick=true;
+      const rect=dom.fab.getBoundingClientRect();
+      localStorage.setItem('fabPos', JSON.stringify({left: rect.left, top: rect.top}));
+    }
+    moved=false;
+  }
+  // Pointer events (mouse + touch)
+  dom.fabMain.addEventListener('pointerdown',(e)=>{ e.preventDefault(); e.stopPropagation(); beginDrag(e.clientX, e.clientY); try{ dom.fabMain.setPointerCapture(e.pointerId);}catch(_){} });
+  dom.fabMain.addEventListener('pointermove',(e)=>{ if(!dragging) return; e.preventDefault(); e.stopPropagation(); updateDrag(e.clientX, e.clientY); });
+  dom.fabMain.addEventListener('pointerup',(e)=>{ e.preventDefault(); e.stopPropagation(); endDrag(); try{ dom.fabMain.releasePointerCapture(e.pointerId);}catch(_){} });
+  dom.fabMain.addEventListener('pointercancel',(e)=>{ e.preventDefault(); e.stopPropagation(); endDrag(); });
+  // Suppress click toggle when just dragged
+  const originalClickHandler = (e)=>{ e.stopPropagation(); dom.fab?.classList.toggle('open'); };
+  dom.fabMain.removeEventListener('click', originalClickHandler);
+  dom.fabMain.addEventListener('click',(e)=>{
+    if(suppressNextClick){ suppressNextClick=false; e.preventDefault(); e.stopPropagation(); return; }
+    e.stopPropagation(); dom.fab?.classList.toggle('open');
+  });
+  // Clamp and persist on resize
+  window.addEventListener('resize',()=>{
+    const rect=dom.fab.getBoundingClientRect();
+    const vw=window.innerWidth, vh=window.innerHeight;
+    const w=rect.width, h=rect.height;
+    const left=clamp(rect.left, 0, vw-w);
+    const top=clamp(rect.top, 0, vh-h);
+    dom.fab.style.left=`${left}px`; dom.fab.style.top=`${top}px`;
+    dom.fab.style.right='auto'; dom.fab.style.bottom='auto';
+    localStorage.setItem('fabPos', JSON.stringify({left, top}));
+  });
+})();
 
 function downloadImages(withFolders){
   const imgs=Object.values(state.images);
