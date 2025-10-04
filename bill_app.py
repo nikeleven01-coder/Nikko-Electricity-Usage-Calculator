@@ -200,16 +200,16 @@ body {
 .folder-header:hover { background: rgba(255,255,255,0.03); }
 .folder-title { font-weight: 600; font-size: 1.15rem; }
 .item-count {
-  color: var(--text);
-  background: rgba(124,92,255,0.12);
-  border: 1px solid rgba(124,92,255,0.25);
+  color: var(--muted);
+  background: rgba(124,92,255,0.08);
+  border: 1px solid rgba(124,92,255,0.16);
   border-radius: 999px;
-  padding: 4px 10px;
-  font-weight: 600;
+  padding: 2px 8px;
+  font-weight: 500;
   line-height: 1;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
 }
-@media (min-width: 1024px) { .item-count { font-size: 1.02rem; } }
+@media (min-width: 1024px) { .item-count { font-size: 0.88rem; } }
 .folder.selected { outline: 2px solid rgba(123, 92, 255, 0.65); outline-offset: -2px; }
 
 .folder-content {
@@ -294,6 +294,12 @@ body {
 /* Selected thumbnail highlight */
 .thumb.selected {
   outline: 2px solid rgba(91,157,255,0.55);
+  outline-offset: -2px;
+}
+
+/* Indicate potential drop target on hover */
+.thumb.drop-target {
+  outline: 2px dashed rgba(91,157,255,0.6);
   outline-offset: -2px;
 }
 
@@ -407,6 +413,7 @@ const state = {
 
 // Touch drag support for mobile
 let touchDragId = null;
+let touchHoverId = null;
 
 // Utils
 function genId(){return Math.random().toString(36).slice(2,10)}
@@ -604,14 +611,14 @@ async function ingestFiles(files){
     const uid=createUniqueId(arr[0].clothType);
     arr.forEach((img,idx)=>{img.uniqueId=uid; img.setId=uid; img.setIndex=idx+1; img.setTotal=arr.length;});
   }
-  // Compose file names and place into cloth-type folders
+  // Compose file names and place all new images into a single "Unsorted" folder
+  const typeName='Unsorted';
+  let folder=state.folders.find(f=>f.name===typeName);
+  if(!folder){folder={id:genId(),name:typeName,images:[]};state.folders.push(folder);}    
   for(const img of newImages){
     const typePart=img.clothType; const shadePart=(img.colorName||'').toLowerCase().replace(/\s+/g,'_');
     const suffix=` ${img.setIndex} of ${img.setTotal}`;
     img.fileName=`${img.uniqueId}, ${typePart}_${shadePart}${suffix}`;
-    // Folder by clothType
-    let folder=state.folders.find(f=>f.name===img.clothType);
-    if(!folder){folder={id:genId(),name:img.clothType,images:[]};state.folders.push(folder);}    
     folder.images.push(img.id);
   }
   render();
@@ -653,12 +660,25 @@ function render(){
       const cell=document.createElement('div');
       cell.className='file-cell';
       const thumb=document.createElement('div');thumb.className='thumb'+(state.selectedImages.has(img.id)?' selected':'');
+      thumb.dataset.imgId = img.id;
+      thumb.dataset.folderId = folder.id;
       thumb.draggable=true;
       thumb.addEventListener('dragstart',(e)=>{e.dataTransfer?.setData('text/plain', img.id);thumb.classList.add('dragging');});
       thumb.addEventListener('dragend',()=>{thumb.classList.remove('dragging');});
+      // allow drop onto a thumbnail to swap/reposition
+      thumb.addEventListener('dragover',(e)=>{e.preventDefault();thumb.classList.add('drop-target');});
+      thumb.addEventListener('dragleave',()=>{thumb.classList.remove('drop-target');});
+      thumb.addEventListener('drop',(e)=>{e.preventDefault();const draggedId=e.dataTransfer?.getData('text/plain');thumb.classList.remove('drop-target');if(!draggedId) return; swapOrInsertWithinFolder(draggedId, img.id);});
       // mobile touch drag
       thumb.addEventListener('touchstart',()=>{touchDragId=img.id;thumb.classList.add('dragging');});
-      thumb.addEventListener('touchend',()=>{thumb.classList.remove('dragging'); /* movement handled on folder touchend */ });
+      thumb.addEventListener('touchend',()=>{
+        thumb.classList.remove('dragging');
+        if(touchDragId && touchHoverId && touchHoverId!==touchDragId){
+          swapOrInsertWithinFolder(touchDragId, touchHoverId);
+        }
+        document.querySelectorAll('.thumb.drop-target').forEach(th=>th.classList.remove('drop-target'));
+        touchDragId=null; touchHoverId=null;
+      });
       const image=document.createElement('img');image.src=img.dataUrl;thumb.appendChild(image);
       const meta=document.createElement('div');meta.className='file-meta';
       const name=document.createElement('div');name.className='name';name.textContent=`${img.fileName}`;
@@ -705,6 +725,16 @@ dom.exportFlat.addEventListener('click',()=>{downloadImages(false)});
 dom.fabMain.addEventListener('click', (e)=>{ e.stopPropagation(); dom.fab?.classList.toggle('open'); });
 document.addEventListener('click', (e)=>{ if(dom.fab && !dom.fab.contains(e.target)) dom.fab.classList.remove('open'); });
 
+// Mobile: track touch hover to improve drop targeting
+document.addEventListener('touchmove',(e)=>{
+  if(!touchDragId) return;
+  const t=e.touches && e.touches[0]; if(!t) return;
+  const el=document.elementFromPoint(t.clientX, t.clientY);
+  document.querySelectorAll('.thumb.drop-target').forEach(th=>th.classList.remove('drop-target'));
+  const thumbEl=el && el.closest ? el.closest('.thumb') : null;
+  if(thumbEl){ thumbEl.classList.add('drop-target'); touchHoverId=thumbEl.dataset.imgId||null; } else { touchHoverId=null; }
+}, {passive:false});
+
 function downloadImages(withFolders){
   const imgs=Object.values(state.images);
   for(const img of imgs){
@@ -717,6 +747,24 @@ function moveImageToFolder(imgId,targetFolderId){
   const folder=state.folders.find(f=>f.id===targetFolderId); if(!folder) return;
   for(const f of state.folders){const idx=f.images.indexOf(imgId); if(idx>=0){f.images.splice(idx,1); break;}}
   folder.images.push(imgId);
+  render();
+}
+
+// Swap within same folder or insert before the target in another folder
+function swapOrInsertWithinFolder(dragId,targetId){
+  if(dragId===targetId) return;
+  const srcFolder=state.folders.find(f=>f.images.includes(dragId));
+  const destFolder=state.folders.find(f=>f.images.includes(targetId));
+  if(!destFolder) return;
+  const targetIndex=destFolder.images.indexOf(targetId);
+  if(srcFolder && srcFolder.id===destFolder.id){
+    const srcIndex=srcFolder.images.indexOf(dragId);
+    if(srcIndex<0 || targetIndex<0) return;
+    [srcFolder.images[srcIndex], srcFolder.images[targetIndex]] = [srcFolder.images[targetIndex], srcFolder.images[srcIndex]];
+  } else {
+    if(srcFolder){const si=srcFolder.images.indexOf(dragId); if(si>=0) srcFolder.images.splice(si,1);}    
+    destFolder.images.splice(targetIndex,0,dragId);
+  }
   render();
 }
 
