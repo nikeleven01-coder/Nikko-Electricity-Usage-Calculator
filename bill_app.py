@@ -199,7 +199,17 @@ body {
 }
 .folder-header:hover { background: rgba(255,255,255,0.03); }
 .folder-title { font-weight: 600; font-size: 1.15rem; }
-.item-count { color: var(--muted); font-size: 1.06rem; }
+.item-count {
+  color: var(--text);
+  background: rgba(124,92,255,0.12);
+  border: 1px solid rgba(124,92,255,0.25);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-size: 0.9rem;
+}
+@media (min-width: 1024px) { .item-count { font-size: 1.02rem; } }
 .folder.selected { outline: 2px solid rgba(123, 92, 255, 0.65); outline-offset: -2px; }
 
 .folder-content {
@@ -309,7 +319,8 @@ body {
 }
 .fab-main:hover { transform: translateY(-2px); box-shadow: 0 28px 58px rgba(0,0,0,0.55), 0 0 0 2px rgba(124,92,255,0.22), 0 0 36px rgba(124,92,255,0.45); }
 .fab-main .icon { width: 28px; height: 28px; color: var(--accent-2); }
-.fab-actions { position: absolute; right: 0; bottom: 76px; display: grid; gap: 10px; }
+.fab-actions { position: absolute; right: 0; bottom: 76px; display: none; gap: 10px; }
+.fab.open .fab-actions { display: grid; }
 .fab-btn {
   width: 44px; height: 44px; border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.08);
@@ -321,6 +332,14 @@ body {
 }
 .fab-btn:hover { transform: translateY(-1px); box-shadow: 0 16px 28px rgba(0,0,0,0.45), 0 0 22px rgba(91,157,255,0.26); }
 .fab-btn .icon { width: 22px; height: 22px; color: var(--text); }
+
+/* FAB responsive sizing */
+@media (max-width: 640px) {
+  .fab { right: 16px; bottom: 16px; }
+  .fab-main { width: 56px; height: 56px; }
+  .fab-actions { bottom: 68px; gap: 8px; }
+  .fab-btn { width: 52px; height: 52px; }
+}
 
 /* Export menu */
 .export-menu {
@@ -363,6 +382,7 @@ const dom = {
   fileInput: document.getElementById('fileInput'),
   folderGrid: document.getElementById('folderGrid'),
   fabMain: document.getElementById('fabMain'),
+  fab: document.querySelector('.fab'),
   actionAdd: document.getElementById('actionAdd'),
   actionEdit: document.getElementById('actionEdit'),
   actionDelete: document.getElementById('actionDelete'),
@@ -384,6 +404,9 @@ const state = {
   selectedFolders: new Set(),
   selectedImages: new Set(),
 };
+
+// Touch drag support for mobile
+let touchDragId = null;
 
 // Utils
 function genId(){return Math.random().toString(36).slice(2,10)}
@@ -620,6 +643,11 @@ function render(){
     // allow dropping onto folder content to move images here
     inner.addEventListener('dragover',(e)=>{e.preventDefault();});
     inner.addEventListener('drop',(e)=>{e.preventDefault();const draggedId=e.dataTransfer?.getData('text/plain');if(!draggedId) return; moveImageToFolder(draggedId, folder.id);});
+    // mobile touch: drop when touch ends inside this folder
+    inner.addEventListener('touchend',()=>{ if(touchDragId){ moveImageToFolder(touchDragId, folder.id); touchDragId=null; } });
+    // also accept drop on full card area
+    card.addEventListener('dragover',(e)=>{e.preventDefault();});
+    card.addEventListener('drop',(e)=>{e.preventDefault();const draggedId=e.dataTransfer?.getData('text/plain');if(!draggedId) return; moveImageToFolder(draggedId, folder.id);});
     folder.images.forEach(imgId=>{
       const img=state.images[imgId];
       const cell=document.createElement('div');
@@ -628,6 +656,9 @@ function render(){
       thumb.draggable=true;
       thumb.addEventListener('dragstart',(e)=>{e.dataTransfer?.setData('text/plain', img.id);thumb.classList.add('dragging');});
       thumb.addEventListener('dragend',()=>{thumb.classList.remove('dragging');});
+      // mobile touch drag
+      thumb.addEventListener('touchstart',()=>{touchDragId=img.id;thumb.classList.add('dragging');});
+      thumb.addEventListener('touchend',()=>{thumb.classList.remove('dragging'); /* movement handled on folder touchend */ });
       const image=document.createElement('img');image.src=img.dataUrl;thumb.appendChild(image);
       const meta=document.createElement('div');meta.className='file-meta';
       const name=document.createElement('div');name.className='name';name.textContent=`${img.fileName}`;
@@ -669,6 +700,10 @@ dom.actionSwap.addEventListener('click',()=>{if(state.selectedFolders.size!==2){
 dom.actionExport.addEventListener('click',()=>{dom.exportMenu.classList.toggle('show');});
 dom.exportWith.addEventListener('click',()=>{downloadImages(true)});
 dom.exportFlat.addEventListener('click',()=>{downloadImages(false)});
+
+// FAB open/close toggle and outside click to close
+dom.fabMain.addEventListener('click', (e)=>{ e.stopPropagation(); dom.fab?.classList.toggle('open'); });
+document.addEventListener('click', (e)=>{ if(dom.fab && !dom.fab.contains(e.target)) dom.fab.classList.remove('open'); });
 
 function downloadImages(withFolders){
   const imgs=Object.values(state.images);
