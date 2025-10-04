@@ -728,11 +728,17 @@ html_blocks = f"""
   /* Smooth expand/collapse using max-height and opacity */
   .list {{
     overflow-y:auto; max-height:500px; padding-right:6px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     --zoom: 1;
     transition: max-height 0.25s ease, opacity 0.25s ease;
   }}
   .folder.collapsed .list {{
-    max-height: 0; opacity: 0; pointer-events: none;
+    max-height: 0; opacity: 0;
+    /* Allow dropping onto collapsed folders */
+    pointer-events: auto;
+    min-height: 40px;
   }}
   .folder-select {{ width:18px; height:18px; display:none; }}
   .folder-title {{
@@ -761,7 +767,9 @@ html_blocks = f"""
     .folder {{ width: calc(var(--card-w) + 60px); }}
     .folder-header {{ padding: 10px 12px; }}
     .toolbar {{ flex-wrap: wrap; gap: 8px; }}
-    .list {{ max-height: none; }}
+    .list {{ max-height: calc(70vh); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }}
+    .handle {{ display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: #f1f3f5; color: #555; border-radius: 6px; margin-top: 6px; cursor: grab; }}
+    .block {{ cursor: default; }}
     /* Reduce columns for responsive layout */
     .folder-grid.columns-3 {{ column-count: 2; }}
     /* Tablet: cap 3 rows per column */
@@ -779,7 +787,7 @@ html_blocks = f"""
     .folder-grid.columns-2 .folder:nth-child(2n),
     .folder-grid.columns-3 .folder:nth-child(2n) {{ break-after: column; }}
     /* Slightly smaller content cap for mobile */
-    .list {{ max-height: 380px; }}
+    .list {{ max-height: calc(65vh); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }}
   }}
 </style>
 
@@ -1416,7 +1424,10 @@ function createBlock(item) {{
       lastSelectedId = idStr;
     }}
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/selectedIds', JSON.stringify(Array.from(selectedIds)));
+    const payload = JSON.stringify(Array.from(selectedIds));
+    // Set both a custom and plain type for cross-browser (Safari) compatibility
+    e.dataTransfer.setData('text/selectedIds', payload);
+    e.dataTransfer.setData('text/plain', payload);
   }});
 
   const handle = document.createElement('div');
@@ -1471,6 +1482,40 @@ function setupHeaderDrop(header, folder, list) {{
   header.addEventListener('dragleave', () => {{ header.style.background = ''; }});
   header.addEventListener('drop', (e) => {{
     e.preventDefault(); header.style.background = '';
+    // If images were dragged, move them into this folder
+    let idsJson = e.dataTransfer.getData('text/selectedIds');
+    if (!idsJson) idsJson = e.dataTransfer.getData('text/plain');
+    if (idsJson) {{
+      try {{
+        const ids = JSON.parse(idsJson || '[]');
+        const destList = folder.querySelector('.list');
+        const tName = (folder.querySelector('.folder-title')?.value || '').trim();
+        const affected = new Set([destList]);
+        for (const id of ids) {{
+          const block = document.querySelector(`.block[data-id="${{id}}"]`);
+          if (!block) continue;
+          if (block.parentElement !== destList) {{
+            if (block.parentElement) affected.add(block.parentElement);
+            block.parentElement?.removeChild(block);
+            destList.appendChild(block);
+          }}
+          block.dataset.clothType = tName;
+          ensureUidPrefixKeepDigits(block, tName, destList);
+          updateFilenameKeepNumbering(block);
+        }}
+        affected.forEach(l => {{
+          const f = l.closest('.folder');
+          const name = f ? (f.querySelector('.folder-title')?.value || '').trim() : tName;
+          renumber(l, name, false);
+          if (f) updateBadge(f);
+        }});
+        updateBadge(folder);
+        syncByPrefix();
+        sendOrder();
+        return;
+      }} catch (err) {{ /* ignore parse errors and continue with folder swap */ }}
+    }}
+    // Folder swap (dragging folder headers)
     const srcId = e.dataTransfer.getData('text/folderId');
     if (srcId) {{
       const srcFolder = Array.from(document.querySelectorAll('#folderGrid .folder')).find(f => String(f.dataset.folderId) === String(srcId));
@@ -1479,7 +1524,6 @@ function setupHeaderDrop(header, folder, list) {{
         sendOrder();
       }}
     }}
-    // Intentionally do nothing for image drops; folder cards are swap-only
   }});
 }}
 
@@ -1593,7 +1637,19 @@ function createFolder(name = "New Folder") {{
   // Append with row-first distribution
   appendFolderRowFirst(folder);
 
-  Sortable.create(list, {{ group: 'shared', animation: 0, handle: '.handle, .thumb', onEnd: onDragEnd }});
+  const isTouch = ('ontouchstart' in window) || window.matchMedia('(max-width: 768px)').matches;
+  Sortable.create(list, {{
+    group: {{ name: 'shared', pull: true, put: true }},
+    animation: 150,
+    draggable: '.block',
+    handle: isTouch ? '.handle' : '.handle, .thumb',
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 3,
+    touchStartThreshold: 4,
+    dragoverBubble: true,
+    onEnd: onDragEnd
+  }});
   setupHeaderDrop(header, folder, list);
   // Swap-only: no image drop area on folder card
 
@@ -1774,10 +1830,17 @@ for (const folder of folderGrid.children) {{
   renumber(list, title);
 }}
 
+const isTouchMain = ('ontouchstart' in window) || window.matchMedia('(max-width: 768px)').matches;
 Sortable.create(mainList, {{
-  group: 'shared',
+  group: {{ name: 'shared', pull: true, put: true }},
   animation: 200,
-  handle: '.handle, .thumb',
+  draggable: '.block',
+  handle: isTouchMain ? '.handle' : '.handle, .thumb',
+  forceFallback: true,
+  fallbackOnBody: true,
+  fallbackTolerance: 3,
+  touchStartThreshold: 4,
+  dragoverBubble: true,
   onEnd: onDragEnd
 }});
 
