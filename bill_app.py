@@ -109,7 +109,7 @@ STYLES_CSS = """
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-y; width: 100%; max-width: 100vw; }
+html, body { height: 100svh; min-height: 100svh; overflow-x: hidden; overscroll-behavior-x: none; touch-action: pan-y; width: 100%; max-width: 100vw; }
 body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
@@ -328,7 +328,7 @@ body {
 
 /* Floating Action Button */
 .fab {
-  position: fixed;
+  position: fixed !important;
   right: calc(24px + env(safe-area-inset-right));
   bottom: calc(24px + env(safe-area-inset-bottom));
   z-index: 10000; /* ensure above all app content */
@@ -343,7 +343,6 @@ body {
   display: grid; place-items: center; cursor: pointer; position: relative;
   z-index: 10001;
   pointer-events: auto; /* clickable even though parent ignores events */
-  touch-action: manipulation; /* responsive tap without interfering with scroll */
   box-shadow:
     0 22px 42px rgba(0,0,0,0.5),
     0 0 0 2px rgba(124,92,255,0.15),
@@ -778,13 +777,16 @@ function render(){
       });
       meta.appendChild(name);meta.appendChild(picker);
       cell.appendChild(thumb);cell.appendChild(meta);
-      // Toggle selection without full re-render to preserve scroll position
+      // Toggle image selection and deselect any selected folders
       thumb.addEventListener('click',(e)=>{
         e.preventDefault();
         e.stopPropagation();
         const multi = e.ctrlKey || e.metaKey;
+        // Always deselect folders when clicking an image
+        state.selectedFolders.clear();
+        document.querySelectorAll('.folder.selected').forEach(el=>el.classList.remove('selected'));
         if (!multi) {
-          // Clear previous selections visually and in state
+          // Clear previous image selections visually and in state
           state.selectedImages.clear();
           document.querySelectorAll('.thumb.selected').forEach(el=>el.classList.remove('selected'));
         }
@@ -832,10 +834,11 @@ function ensureUniqueFolderName(baseName, skipFolderId){
   return candidate;
 }
 
-dom.actionAdd.addEventListener('click',()=>{
-  const raw=prompt('New folder name');
-  if(raw==null) return;
-  const name=ensureUniqueFolderName(raw);
+dom.actionAdd.addEventListener('click',(e)=>{
+  e.stopPropagation();
+  let raw=null;
+  try { if(typeof window.prompt==='function') raw=window.prompt('New folder name'); } catch(_) {}
+  const name=ensureUniqueFolderName(raw||`Untitled ${state.folders.length+1}`);
   state.folders.push({id:genId(),name,images:[]});
   render();
 });
@@ -852,7 +855,46 @@ dom.actionEdit.addEventListener('click',()=>{
   recomputeSetIndicesAndNames();
   render();
 });
-dom.actionDelete.addEventListener('click',()=>{if(state.selectedFolders.size<1){alert('Select folder(s) to delete.');return;}const ids=new Set(state.selectedFolders);state.folders=state.folders.filter(f=>!ids.has(f.id));render();});
+dom.actionDelete.addEventListener('click',(e)=>{
+  e.stopPropagation();
+  // If images are selected, delete images after confirmation
+  if(state.selectedImages && state.selectedImages.size > 0){
+    const count = state.selectedImages.size;
+    let ok = true;
+    try { ok = window.confirm(`Delete ${count} selected image(s)?`); } catch(_) {}
+    if(!ok) return;
+    // Remove each selected image from its folder and from state.images
+    const ids = [...state.selectedImages];
+    for(const id of ids){
+      // Remove from folder arrays
+      for(const f of state.folders){
+        const idx = f.images.indexOf(id);
+        if(idx >= 0){ f.images.splice(idx,1); break; }
+      }
+      // Remove from images map
+      if(state.images && state.images[id]){ delete state.images[id]; }
+    }
+    state.selectedImages.clear();
+    render();
+    return;
+  }
+  // Otherwise, handle folder deletion (with warning if they contain images)
+  if(state.selectedFolders.size<1){ console.log('Select image(s) or folder(s) to delete.'); return; }
+  const selected=[...state.selectedFolders];
+  const foldersWithImages=selected.map(id=>state.folders.find(f=>f.id===id)).filter(f=>f && (f.images||[]).length>0);
+  if(foldersWithImages.length>0){
+    const totalImages=foldersWithImages.reduce((sum,f)=>sum + (f.images?.length||0), 0);
+    let ok=true;
+    try {
+      ok = window.confirm(`Delete ${foldersWithImages.length} folder(s) containing ${totalImages} image(s)?`);
+    } catch(_) {}
+    if(!ok) return;
+  }
+  const ids=new Set(selected);
+  state.folders=state.folders.filter(f=>!ids.has(f.id));
+  state.selectedFolders.clear();
+  render();
+});
 dom.actionRandom.addEventListener('click', async()=>{
   if(state.selectedImages.size<1){alert('Select image(s) to assign new Unique ID.');return;}
   for(const id of state.selectedImages){
@@ -888,8 +930,15 @@ dom.exportWith.addEventListener('click',()=>{downloadImages(true)});
 dom.exportFlat.addEventListener('click',()=>{downloadImages(false)});
 
 // FAB open/close toggle and outside click to close
-dom.fabMain.addEventListener('click', (e)=>{ e.stopPropagation(); dom.fab?.classList.toggle('open'); });
-document.addEventListener('click', (e)=>{ if(dom.fab && !dom.fab.contains(e.target)) dom.fab.classList.remove('open'); });
+dom.fabMain.addEventListener('click', (e)=>{
+  e.stopPropagation();
+  const fabContainer = dom.fabMain?.closest('.fab') || document.querySelector('.fab');
+  if (fabContainer) fabContainer.classList.toggle('open');
+});
+document.addEventListener('click', (e)=>{
+  const fabContainer = document.querySelector('.fab');
+  if (fabContainer && !fabContainer.contains(e.target)) fabContainer.classList.remove('open');
+});
 
 // Mobile: track touch hover to improve drop targeting
 document.addEventListener('touchmove',(e)=>{
@@ -900,17 +949,6 @@ document.addEventListener('touchmove',(e)=>{
   const thumbEl=el && el.closest ? el.closest('.thumb') : null;
   if(thumbEl){ thumbEl.classList.add('drop-target'); touchHoverId=thumbEl.dataset.imgId||null; } else { touchHoverId=null; }
 }, {passive:false});
-
-// Ensure FAB anchors bottom-right across devices; clear any stale overrides
-(() => {
-  if (dom.fab) {
-    dom.fab.style.left = '';
-    dom.fab.style.top = '';
-    dom.fab.style.right = '';
-    dom.fab.style.bottom = '';
-  }
-  try { localStorage.removeItem('fabPos'); } catch(_) {}
-})();
 
 function downloadImages(withFolders){
   const imgs=Object.values(state.images);
@@ -1229,6 +1267,51 @@ function recomputeSetIndicesAndNames(){
 attachUploadHandlers();
 render();
 window.addEventListener('resize',()=>{render()});
+
+// Ensure FAB floats relative to the viewport at all times
+document.addEventListener('DOMContentLoaded', () => {
+  const originalFab = document.querySelector('.fab');
+  if (!originalFab) return;
+  // Create a portal container fixed to the viewport bottom-right
+  const portal = document.createElement('div');
+  portal.className = 'fab';
+  // Move all children into the portal to avoid any transformed ancestors
+  while (originalFab.firstChild) {
+    portal.appendChild(originalFab.firstChild);
+  }
+  // Replace original with portal at body level
+  document.body.appendChild(portal);
+  // Remove the original container and rebind references
+  try { originalFab.remove(); } catch(_) {}
+  if (window.dom) { window.dom.fab = portal; }
+
+  // Fallback: if position: fixed doesn't stick in some mobile engines,
+  // detect movement on scroll and emulate fixed via absolute positioning.
+  let useAbsoluteFallback = false;
+  let lastRect = portal.getBoundingClientRect();
+  function updateFabPosition(){
+    const computed = window.getComputedStyle(portal);
+    const right = parseInt(computed.right) || 24;
+    const bottom = parseInt(computed.bottom) || 24;
+    if (useAbsoluteFallback){
+      portal.style.position = 'absolute';
+      portal.style.top = (window.scrollY + window.innerHeight - bottom - portal.offsetHeight) + 'px';
+      portal.style.left = (window.scrollX + window.innerWidth - right - portal.offsetWidth) + 'px';
+    } else {
+      portal.style.position = 'fixed';
+    }
+  }
+  window.addEventListener('scroll', ()=>{
+    const r = portal.getBoundingClientRect();
+    if (lastRect && Math.abs(r.top - lastRect.top) > 0.5) {
+      useAbsoluteFallback = true;
+    }
+    lastRect = r;
+    updateFabPosition();
+  }, { passive: true });
+  window.addEventListener('resize', updateFabPosition);
+  updateFabPosition();
+});
 """
 
 def build_embedded_html():
@@ -1244,24 +1327,21 @@ def build_embedded_html():
 
 
 # ----------------------------------------
-# Simple dashboard with embedded web app
+# Render embedded web app full-screen
 # ----------------------------------------
-st.title("⚡ Utility Tools Dashboard")
-st.write("Select a tool below to get started:")
-
-if "page" not in st.session_state:
-    st.session_state["page"] = "home"
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.button("💡 Electric Bill Calculator", use_container_width=True)
-with col2:
-    if st.button("👗 Cloth Renamer & Organizer", use_container_width=True):
-        st.session_state["page"] = "web_app"
-with col3:
-    st.button("📊 Coming Soon", use_container_width=True)
-
-st.markdown("---")
-if st.session_state["page"] == "web_app":
-    st.header("👗 Cloth Renamer & Organizer")
-    components.html(build_embedded_html(), height=1200, scrolling=True)
+st.set_page_config(page_title="Smart Folder", layout="wide", initial_sidebar_state="collapsed")
+st.markdown(
+    """
+    <style>
+    html, body, div[data-testid="stAppViewContainer"], .main, .block-container {
+      height: 100svh; min-height: 100svh; overflow: hidden; padding: 0; margin: 0;
+    }
+    div[data-testid="stAppViewContainer"] { padding: 0 !important; }
+    section[data-testid="stSidebar"] { display: none; }
+    /* Make the embedded iframe full-screen and prevent outer scroll */
+    div[data-testid="stAppViewContainer"] iframe { height: 100svh !important; width: 100vw !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+components.html(build_embedded_html(), height=1200, scrolling=False)
